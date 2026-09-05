@@ -1,0 +1,57 @@
+:root{
+/* Departure Mono degrades to the body face, never to a generic system mono. */
+--font-mono:"IBM Plex Mono",ui-monospace,"SF Mono",Consolas,monospace;
+--font-pixel:"Departure Mono","IBM Plex Mono",monospace;
+
+/* Scale: 11 -> 48px, 1.2 ratio (minor third), hand-broken at display. */
+--type-display-family:var(--font-mono);
+--type-display-size:48px;
+--type-display-weight:700;
+--type-display-leading:1;
+--type-display-tracking:-0.02em;
+
+--type-headline-family:var(--font-mono);
+--type-headline-size:23px;
+--type-headline-weight:700;
+--type-headline-leading:1.2;
+--type-headline-tracking:-0.01em;
+
+--type-headline-sm-family:var(--font-mono);
+--type-headline-sm-size:19px;
+--type-headline-sm-weight:700;
+--type-headline-sm-leading:1.25;
+--type-headline-sm-tracking:0em;
+
+--type-body-md-family:var(--font-mono);
+--type-body-md-size:13px;
+--type-body-md-weight:400;
+--type-body-md-leading:1.55;
+--type-body-md-tracking:0em;
+
+--type-data-lg-family:var(--font-mono);
+--type-data-lg-size:16px;
+--type-data-lg-weight:400;
+--type-data-lg-leading:1.4;
+--type-data-lg-tracking:0em;
+
+--type-data-sm-family:var(--font-mono);
+--type-data-sm-size:12px;
+--type-data-sm-weight:400;
+--type-data-sm-leading:1.4;
+--type-data-sm-tracking:0em;
+
+--type-caption-family:var(--font-mono);
+--type-caption-size:11px;
+--type-caption-weight:400;
+--type-caption-leading:1.4;
+--type-caption-tracking:0.01em;
+
+--type-label-caps-family:var(--font-pixel);
+--type-label-caps-size:12px;
+--type-label-caps-weight:400;
+--type-label-caps-leading:1.3;
+--type-label-caps-tracking:0.15em;
+
+/* Tabular figures wherever numbers appear. */
+--figures-tabular:"tnum" 1; /* @kind other */
+}

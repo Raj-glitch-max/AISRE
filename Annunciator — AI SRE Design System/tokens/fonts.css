@@ -1,0 +1,5 @@
+/* Self-hosted, SIL OFL. No third-party font CDN — see readme.md > Typography. */
+@font-face{font-family:"IBM Plex Mono";font-style:normal;font-weight:400;font-display:swap;src:url("../assets/fonts/ibm-plex-mono-400.woff2") format("woff2")}
+@font-face{font-family:"IBM Plex Mono";font-style:italic;font-weight:400;font-display:swap;src:url("../assets/fonts/ibm-plex-mono-400-italic.woff2") format("woff2")}
+@font-face{font-family:"IBM Plex Mono";font-style:normal;font-weight:700;font-display:swap;src:url("../assets/fonts/ibm-plex-mono-700.woff2") format("woff2")}
+@font-face{font-family:"Departure Mono";font-style:normal;font-weight:400;font-display:swap;src:url("../assets/fonts/departure-mono-regular.woff2") format("woff2"),url("../assets/fonts/departure-mono-regular.woff") format("woff")}

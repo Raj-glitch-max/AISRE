@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI SRE — Incidents</title>
+<link rel="stylesheet" href="./tokens.css">
+<style>
+  body { padding: var(--space-xl) var(--space-lg); }
+  .shell { max-width: var(--panel-max); margin: 0 auto; }
+
+  .masthead {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    padding: 0 var(--space-md) var(--space-lg);
+  }
+  .masthead .bar {
+    width: 10px;
+    height: 26px;
+    background: var(--signal-caution);
+    flex: none;
+  }
+  .masthead .wordmark {
+    font-family: var(--font-pixel);
+    font-size: var(--type-headline-sm-size);
+    letter-spacing: 0.15em;
+    color: var(--text-body);
+  }
+
+  .divider { height: var(--hairline); background: var(--rule-hairline); border: 0; }
+
+  .meta {
+    font-family: var(--type-data-sm-family);
+    font-size: var(--type-data-sm-size);
+    line-height: var(--type-data-sm-leading);
+    color: var(--text-meta);
+    font-feature-settings: var(--figures-tabular);
+  }
+  .meta.caption { font-size: var(--type-caption-size); line-height: var(--type-caption-leading); }
+  .meta.caps {
+    font-family: var(--font-pixel);
+    font-size: var(--type-label-caps-size);
+    letter-spacing: var(--type-label-caps-tracking);
+    text-transform: uppercase;
+    font-feature-settings: normal;
+  }
+  .push-right { margin-left: auto; }
+
+  /* ---------- status badge: the signal colour is the text, never a filled pill ---------- */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    font-family: var(--font-pixel);
+    font-size: var(--type-label-caps-size);
+    line-height: var(--type-label-caps-leading);
+    letter-spacing: var(--type-label-caps-tracking);
+    padding: var(--space-xs);
+    background: var(--surface-page);
+    white-space: nowrap;
+  }
+  .badge.on-panel { background: var(--surface-panel); }
+  .badge.caution { color: var(--signal-caution); }
+  .badge.nominal { color: var(--signal-nominal); }
+  .badge.warning { color: var(--signal-warning); }
+  .badge .dot { width: 6px; height: 6px; background: currentColor; flex: none; }
+  .pulse { animation: annunciator-pulse var(--pulse-duration) var(--pulse-easing) infinite; }
+
+  /* ---------- list ---------- */
+  .list-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: 0 var(--space-md) var(--space-md);
+  }
+  .list-head .left {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--space-sm);
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 92px 1fr 132px;
+    align-items: center;
+    gap: var(--space-md);
+    width: 100%;
+    padding: var(--space-sm) var(--space-md);
+    background: var(--surface-page);
+    border: 0;
+    text-align: left;
+    cursor: pointer;
+    color: inherit;
+    font: inherit;
+  }
+  .row:hover { background: var(--surface-row-hover); }
+  .row .title {
+    font-size: var(--type-body-md-size);
+    color: var(--text-body);
+    line-height: 1.3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .row .sub { display: block; margin-top: 2px; }
+  .row .badge-cell { justify-self: end; }
+
+  .empty { padding: var(--space-xl) var(--space-md); color: var(--text-meta); }
+
+  /* ---------- detail ---------- */
+  .detail { display: grid; gap: var(--space-md); }
+  .back {
+    font-family: var(--font-pixel);
+    font-size: var(--type-label-caps-size);
+    letter-spacing: var(--type-label-caps-tracking);
+    color: var(--text-meta);
+    cursor: pointer;
+    background: none;
+    border: 0;
+    padding: 0 var(--space-md);
+    text-align: left;
+  }
+  .back:hover { color: var(--text-body); }
+
+  .panel {
+    background: var(--surface-panel);
+    color: var(--text-body);
+    padding: var(--space-lg);
+  }
+  .panel > .panel-label {
+    display: block;
+    font-family: var(--font-pixel);
+    font-size: var(--type-label-caps-size);
+    letter-spacing: var(--type-label-caps-tracking);
+    text-transform: uppercase;
+    color: var(--text-meta);
+    margin-bottom: var(--space-md);
+  }
+  .detail-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: var(--space-lg);
+  }
+  .detail-head h1 {
+    margin: 0;
+    font-size: var(--type-headline-size);
+    font-weight: var(--type-headline-weight);
+    line-height: var(--type-headline-leading);
+    letter-spacing: var(--type-headline-tracking);
+    color: var(--text-body);
+  }
+
+  /* ---------- stepper: six flush segments reading as one bar ---------- */
+  .stepper { margin-top: var(--space-lg); }
+  .stepper .segs { display: flex; gap: var(--space-xs); align-items: stretch; }
+  .stepper .seg { height: var(--stepper-height); background: var(--signal-inert); }
+  .stepper .seg.done { background: var(--signal-nominal); }
+  .stepper .seg.current { background: var(--signal-caution); }
+  .stepper .seg.failed { background: var(--signal-warning); }
+  .stepper .labels { display: flex; justify-content: space-between; margin-top: var(--space-sm); }
+  .stepper .labels span {
+    font-size: var(--type-caption-size);
+    line-height: var(--type-caption-leading);
+    letter-spacing: var(--type-caption-tracking);
+    color: var(--text-meta);
+  }
+  .stepper .labels span.active { color: var(--signal-caution); }
+  .stepper .labels span.active-failed { color: var(--signal-warning); }
+
+  /* ---------- readouts ---------- */
+  .readouts { display: flex; gap: var(--space-xl); align-items: flex-end; }
+  .readout .label {
+    display: block;
+    font-family: var(--font-pixel);
+    font-size: var(--type-label-caps-size);
+    letter-spacing: var(--type-label-caps-tracking);
+    text-transform: uppercase;
+    color: var(--text-meta);
+    margin-bottom: var(--space-sm);
+  }
+  .readout .value {
+    font-family: var(--type-display-family);
+    font-size: var(--type-display-size);
+    font-weight: var(--type-display-weight);
+    line-height: var(--type-display-leading);
+    letter-spacing: var(--type-display-tracking);
+    font-feature-settings: var(--figures-tabular);
+    color: var(--text-body);
+  }
+  .readout .unit { font-size: 0.5em; margin-left: 0.12em; color: var(--text-meta); }
+  .readout.secondary { padding-bottom: var(--space-xs); }
+  .readout.secondary .value { font-size: var(--type-data-lg-size); font-weight: 400; }
+  .risk-high { color: var(--signal-warning) !important; }
+  .risk-medium { color: var(--signal-caution) !important; }
+  .risk-low { color: var(--signal-nominal) !important; }
+
+  .prose { margin: 0; max-width: var(--measure); text-wrap: pretty; }
+
+  .evidence-row { padding: var(--space-sm) 0; font-size: var(--type-data-sm-size); color: var(--text-body); }
+
+  .remediation-foot {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    margin-top: var(--space-lg);
+    flex-wrap: wrap;
+  }
+  button.approve {
+    appearance: none;
+    border: 0;
+    cursor: pointer;
+    background: var(--action-fill);
+    color: var(--action-ink);
+    font-family: var(--font-pixel);
+    font-size: var(--type-label-caps-size);
+    font-weight: 700;
+    line-height: var(--type-label-caps-leading);
+    letter-spacing: var(--type-label-caps-tracking);
+    padding: var(--space-md);
+  }
+  button.approve:hover:not(:disabled) { background: var(--action-fill-hover); }
+  button.approve:disabled { background: var(--surface-float); color: var(--text-meta); cursor: default; }
+
+  .inflight {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    color: var(--signal-caution);
+    font-size: var(--type-data-sm-size);
+  }
+  .inflight .dot { width: 6px; height: 6px; background: var(--signal-caution); flex: none; }
+  .failed-note { color: var(--signal-warning); }
+
+  :focus-visible { outline: 2px solid var(--signal-caution); outline-offset: 2px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="shell">
+  <div class="masthead">
+    <span class="bar"></span>
+    <span class="wordmark">AI SRE</span>
+    <span class="meta caption push-right" id="clock"></span>
+  </div>
+  <hr class="divider">
+  <div style="padding-top: var(--space-lg)">
+    <section id="list-view"></section>
+    <section id="detail-view" hidden></section>
+  </div>
+</div>
+
+<script>
+const STEP_LABELS = ["DETECT", "TRIAGE", "DIAGNOSE", "APPROVE", "EXECUTE", "VERIFY"];
+
+// Real backend statuses -> the design system's status vocabulary.
+const STATUS = {
+  open:             { variant: "caution", label: "OPEN",          step: 0 },
+  investigating:    { variant: "caution", label: "INVESTIGATING", step: 2 },
+  pending_approval: { variant: "caution", label: "AWAITING",      step: 3, pulse: true },
+  executing:        { variant: "caution", label: "EXECUTING",     step: 4, dot: true },
+  verifying:        { variant: "caution", label: "VERIFYING",     step: 5, dot: true },
+  resolved:         { variant: "nominal", label: "RESOLVED",      step: 6 },
+  failed:           { variant: "warning", label: "FAILED",        step: 4 },
+};
+
+function statusSpec(status) {
+  return STATUS[status] || { variant: "caution", label: String(status || "UNKNOWN").toUpperCase(), step: 0 };
+}
+
+// Everything rendered below comes from the DB — root_cause/evidence are model
+// output. Escape before it ever reaches innerHTML.
+function esc(value) {
+  return String(value == null ? "" : value).replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+  ));
+}
+
+function fmtTime(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso.endsWith("Z") ? iso : iso + "Z");
+  if (isNaN(d)) return "—";
+  return d.toUTCString().slice(17, 25) + " UTC";
+}
+
+function fmtConfidence(c) {
+  if (c === null || c === undefined || isNaN(c)) return null;
+  return Math.round(c * 100);
+}
+
+function shouldPoll(status) {
+  return status === "executing" || status === "verifying";
+}
+
+function badge(status, onPanel) {
+  const spec = statusSpec(status);
+  const cls = ["badge", spec.variant, onPanel ? "on-panel" : "", spec.pulse ? "pulse" : ""].join(" ");
+  const dot = spec.dot ? '<span class="dot pulse" aria-hidden="true"></span>' : "";
+  return `<span class="${cls}">${dot}${esc(spec.label)}</span>`;
+}
+
+function stepper(status) {
+  const spec = statusSpec(status);
+  const failed = status === "failed";
+  const current = spec.step;
+  let segs = "";
+
+  if (failed) {
+    for (let i = 0; i < current; i++) segs += '<span class="seg done" style="flex:1"></span>';
+    segs += `<span class="seg failed" style="flex:${Math.max(1, 6 - current)}"></span>`;
+  } else {
+    for (let i = 0; i < 6; i++) {
+      const state = i < current ? "done" : i === current ? "current" : "";
+      segs += `<span class="seg ${state}" style="flex:1"></span>`;
+    }
+  }
+
+  const labels = STEP_LABELS.map((l, i) => {
+    const cls = i === current ? (failed ? "active-failed" : "active") : "";
+    return `<span class="${cls}">${l}</span>`;
+  }).join("");
+
+  return `<div class="stepper"><div class="segs">${segs}</div><div class="labels">${labels}</div></div>`;
+}
+
+let incidents = [];
+let openId = null;
+let pollHandle = null;
+
+async function fetchIncidents() {
+  const res = await fetch("/incidents");
+  incidents = await res.json();
+  return incidents;
+}
+
+function stopPolling() {
+  if (pollHandle) { clearInterval(pollHandle); pollHandle = null; }
+}
+
+function startPolling() {
+  if (pollHandle) return;
+  pollHandle = setInterval(async () => {
+    await fetchIncidents();
+    const fresh = incidents.find((i) => i.id === openId);
+    if (!fresh) return;
+    renderDetail(fresh);
+    if (!shouldPoll(fresh.status)) stopPolling();
+  }, 3000);
+}
+
+function renderList() {
+  openId = null;
+  stopPolling();
+  document.getElementById("detail-view").hidden = true;
+  const el = document.getElementById("list-view");
+  el.hidden = false;
+
+  if (!incidents.length) {
+    el.innerHTML = `<div class="empty">No incidents. victim-app is healthy — nothing for the agent to investigate.</div>`;
+    return;
+  }
+
+  const sorted = [...incidents].sort((a, b) => b.id - a.id);
+  const awaiting = incidents.filter((i) => i.status === "pending_approval").length;
+
+  el.innerHTML = `
+    <div class="list-head">
+      <span class="left">
+        <span class="meta caps">Incidents</span>
+        <span class="meta">${sorted.length} total</span>
+      </span>
+      ${awaiting > 0 ? `<span class="badge caution pulse">${awaiting} AWAITING</span>` : ""}
+    </div>
+    <hr class="divider">
+    ${sorted.map((inc, i) => `
+      <button class="row" data-id="${inc.id}">
+        <span class="meta">INC-${String(inc.id).padStart(4, "0")}</span>
+        <span style="min-width:0">
+          <span class="title">${esc(inc.root_cause || "Investigation in progress…")}</span>
+          <span class="meta caption sub">${esc(inc.service_name || "victim-app")} · opened ${fmtTime(inc.opened_at)}</span>
+        </span>
+        <span class="badge-cell">${badge(inc.status, false)}</span>
+      </button>
+      ${i < sorted.length - 1 ? '<hr class="divider">' : ""}
+    `).join("")}
+    <hr class="divider">
+  `;
+
+  el.querySelectorAll(".row").forEach((row) => {
+    row.addEventListener("click", () => openDetail(Number(row.dataset.id)));
+  });
+}
+
+function remediationFoot(inc) {
+  if (inc.status === "pending_approval") {
+    return `<button class="approve" id="approve-btn">APPROVE RESTART</button>`;
+  }
+  if (inc.status === "executing" || inc.status === "verifying") {
+    const word = inc.status === "executing" ? "restarting…" : "verifying…";
+    return `<span class="inflight"><span class="dot pulse" aria-hidden="true"></span>${word}</span>`;
+  }
+  if (inc.status === "resolved") {
+    return `<span class="meta">Verified healthy at ${fmtTime(inc.resolved_at)}.</span>`;
+  }
+  if (inc.status === "failed") {
+    return `<span class="meta failed-note">Health did not recover after restart. Needs a manual look.</span>`;
+  }
+  return `<span class="meta">No remediation proposed yet — the agent is still investigating.</span>`;
+}
+
+function renderDetail(inc) {
+  document.getElementById("list-view").hidden = true;
+  const el = document.getElementById("detail-view");
+  el.hidden = false;
+
+  const confidence = fmtConfidence(inc.confidence);
+  const evidence = Array.isArray(inc.evidence) ? inc.evidence : [];
+  const risk = inc.risk || null;
+
+  el.innerHTML = `
+    <div class="detail">
+      <button class="back" id="back-btn">← ALL INCIDENTS</button>
+
+      <section class="panel">
+        <div class="detail-head">
+          <div>
+            <h1>${esc(inc.root_cause ? "Incident " + inc.id : "Incident " + inc.id + " — investigating")}</h1>
+            <span class="meta" style="display:block;margin-top:var(--space-sm)">
+              INC-${String(inc.id).padStart(4, "0")} · ${esc(inc.service_name || "victim-app")} · opened ${fmtTime(inc.opened_at)}
+            </span>
+          </div>
+          ${badge(inc.status, true)}
+        </div>
+        ${stepper(inc.status)}
+      </section>
+
+      ${(confidence !== null || risk) ? `
+      <section class="panel">
+        <div class="readouts">
+          ${confidence !== null ? `
+            <div class="readout">
+              <span class="label">Confidence</span>
+              <span class="value">${confidence}<span class="unit">%</span></span>
+            </div>` : ""}
+          ${risk ? `
+            <div class="readout secondary">
+              <span class="label">Risk</span>
+              <span class="value risk-${esc(risk)}">${esc(risk.toUpperCase())}</span>
+            </div>` : ""}
+        </div>
+      </section>` : ""}
+
+      <section class="panel">
+        <span class="panel-label">Root cause</span>
+        <p class="prose">${esc(inc.root_cause || "Still investigating — no root cause determined yet.")}</p>
+        ${evidence.length ? `
+          <hr class="divider" style="margin: var(--space-lg) 0 var(--space-sm)">
+          <span class="panel-label" style="margin: var(--space-md) 0 var(--space-xs)">Evidence</span>
+          ${evidence.map((e, i) => `
+            <div class="evidence-row">${esc(e)}</div>
+            ${i < evidence.length - 1 ? '<hr class="divider">' : ""}
+          `).join("")}
+        ` : ""}
+      </section>
+
+      <section class="panel">
+        <span class="panel-label">Remediation</span>
+        <p class="prose">${esc(inc.recommended_action || "Pending — no remediation proposed yet.")}</p>
+        <p class="meta caption" style="margin: var(--space-sm) 0 0; max-width: var(--measure)">
+          Approval executes a fixed action — <code>docker restart victim-app</code> — not the text above.
+        </p>
+        <div class="remediation-foot">${remediationFoot(inc)}</div>
+      </section>
+    </div>
+  `;
+
+  el.querySelector("#back-btn").addEventListener("click", renderList);
+  const approveBtn = el.querySelector("#approve-btn");
+  if (approveBtn) approveBtn.addEventListener("click", () => approve(inc.id, approveBtn));
+}
+
+async function openDetail(id) {
+  openId = id;
+  const inc = incidents.find((i) => i.id === id);
+  if (inc) renderDetail(inc);
+  if (inc && shouldPoll(inc.status)) startPolling();
+}
+
+async function approve(id, btn) {
+  btn.disabled = true;
+  btn.textContent = "APPROVING…";
+
+  const res = await fetch(`/incidents/${id}/approve`, { method: "POST" });
+
+  if (!res.ok) {
+    // 409 when the incident is no longer pending_approval — the guard fired.
+    const body = await res.json().catch(() => ({}));
+    btn.textContent = "REJECTED";
+    const foot = btn.parentElement;
+    foot.insertAdjacentHTML(
+      "beforeend",
+      `<span class="meta failed-note">${esc(body.detail || "approval rejected")}</span>`
+    );
+    await fetchIncidents();
+    return;
+  }
+
+  await fetchIncidents();
+  const fresh = incidents.find((i) => i.id === id);
+  if (fresh) renderDetail(fresh);
+  startPolling();
+}
+
+function tickClock() {
+  document.getElementById("clock").textContent =
+    new Date().toUTCString().slice(17, 25) + " UTC";
+}
+
+(async function init() {
+  tickClock();
+  setInterval(tickClock, 1000);
+  await fetchIncidents();
+  renderList();
+  // Refresh the list while it's the visible view; detail has its own poller.
+  setInterval(async () => {
+    if (openId === null) {
+      await fetchIncidents();
+      renderList();
+    }
+  }, 5000);
+})();
+</script>
+</body>
+</html>

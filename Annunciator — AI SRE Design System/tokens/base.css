@@ -1,0 +1,7 @@
+/* Page-level defaults only. Components carry their own styling. */
+html{background:var(--surface-page)}
+body{margin:0;background:var(--surface-page);color:var(--text-body);font-family:var(--type-body-md-family);font-size:var(--type-body-md-size);font-weight:var(--type-body-md-weight);line-height:var(--type-body-md-leading);font-feature-settings:var(--figures-tabular);-webkit-font-smoothing:antialiased}
+*,*::before,*::after{box-sizing:border-box;border-radius:0}
+a{color:var(--signal-caution);text-decoration:none;border-bottom:var(--hairline) solid var(--signal-caution)}
+a:hover{color:var(--action-fill-hover);border-bottom-color:var(--action-fill-hover)}
+::selection{background:var(--sodium-caution);color:var(--panel-black)}

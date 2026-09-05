@@ -1,0 +1,50 @@
+/* Dark only. No light variant — the backlit readout only exists against a dark face. */
+:root{
+/* --- base ramp: warm black, OKLCH hue ~65, chroma 0.010-0.011 --- */
+--panel-black:#0e0a07;
+--panel-surface:#181410;
+--panel-overlay:#251f1b;
+--panel-border:#352f2a;
+--panel-ink:#ebe7e4;
+--warm-grey:#8c857e;
+
+/* --- signal colors: one meaning each, nothing else may use them --- */
+--sodium-caution:#f9a800;
+--sodium-caution-bright:#ffc247;
+--phosphor-nominal:#7fe059;
+--warning-red:#f64258;
+
+/* --- spec aliases (names used by DESIGN.md front matter) --- */
+--color-primary:var(--sodium-caution);
+--color-secondary:var(--warm-grey);
+--color-tertiary:var(--phosphor-nominal);
+--color-neutral:var(--panel-black);
+--color-surface:var(--panel-surface);
+--color-overlay:var(--panel-overlay);
+--color-border:var(--panel-border);
+--color-on-surface:var(--panel-ink);
+--color-error:var(--warning-red);
+
+/* --- semantic: surfaces --- */
+--surface-page:var(--panel-black);
+--surface-panel:var(--panel-surface);
+--surface-float:var(--panel-overlay);
+--surface-row-hover:var(--panel-surface);
+
+/* --- semantic: ink --- */
+--text-body:var(--panel-ink);
+--text-meta:var(--warm-grey);
+--text-on-caution:var(--panel-black);
+
+/* --- semantic: signals --- */
+--signal-nominal:var(--phosphor-nominal);
+--signal-caution:var(--sodium-caution);
+--signal-warning:var(--warning-red);
+--signal-inert:var(--panel-border);
+
+/* --- semantic: structure --- */
+--rule-hairline:var(--panel-border);
+--action-fill:var(--sodium-caution);
+--action-fill-hover:var(--sodium-caution-bright);
+--action-ink:var(--panel-black);
+}

@@ -297,14 +297,187 @@ persisted, and the incident correctly reached `pending_approval` then `resolved`
 
 **Phase 2+3+4 done.**
 
+## Phase 5 — remediation + verification (`backend/remediation.py`)
+
+### What it does
+
+`approve_and_remediate(incident_id)` drives `pending_approval → executing →
+verifying → resolved | failed`:
+
+1. Re-checks the incident is `pending_approval`, else raises
+   `IncidentNotPendingApproval`.
+2. `docker restart victim-app`. This genuinely fixes the toy system because the
+   broken state is a single in-memory Python flag — restarting the process resets it
+   to its code default, the same reason "turn it off and on again" actually works on
+   real transient/stateful bugs.
+3. Waits `VERIFY_WAIT_SECONDS = 8`, then re-checks `/health` up to 3 times at 3s
+   intervals.
+4. `resolved` + `resolved_at` if health came back; `failed` otherwise. A failed
+   restart short-circuits to `failed` and never reaches verification.
+
+**What it deliberately does not do:** it never executes the agent's free-text
+`recommended_action`. The action is fixed and predetermined — a container restart.
+The human approves "restart the service given this diagnosis," not "run whatever the
+model suggested." This turned out to matter in practice — see the hallucination note
+below.
+
+### Deviations from the spec's code, and why
+
+- `from db import SessionLocal` → `from database import SessionLocal` (this project's
+  module is `database.py`).
+- `import requests` → `httpx`. The spec claimed `requests` was already in the Phase 1
+  `requirements.txt`; it isn't — this project uses `httpx`, which is already a
+  dependency and has an equivalent sync API. Adding `requests` would have meant a new
+  dependency for no gain.
+- `main.py`'s endpoint uses `SessionLocal()` directly rather than the spec's
+  `db: Session = Depends(get_db)` — this project has no `get_db` dependency, and
+  matching the existing style beat inventing one.
+- `StaticFiles(directory="static")` → an absolute path derived from `__file__`. A
+  relative path breaks whenever uvicorn is started from any directory other than
+  `backend/`.
+
+### The synchronous guard (the spec's load-bearing point)
+
+The `pending_approval` check lives in the *endpoint*, before
+`background_tasks.add_task(...)`. `BackgroundTasks` runs after the response is
+already sent, so a guard living only inside `approve_and_remediate` would return
+`{"status": "approval received"}` to an invalid request and surface the rejection
+nowhere but the server log. Verified directly:
+
+| Request | Result |
+|---|---|
+| `POST /incidents/1/approve` (already `resolved`) | **409** `incident is not pending approval (status: resolved)` |
+| `POST /incidents/999/approve` (nonexistent) | **404** `incident not found` |
+| `POST /incidents/3/approve` (genuinely pending) | **200** `approval received, remediation started` |
+
+### End-to-end remediation run (incident #3)
+
+victim-app was broken and **deliberately never fixed by hand** — the restart had to
+be what fixed it, or the test would prove nothing.
+
+```
+[incident 3] status -> executing
+[incident 3] status -> verifying
+[incident 3] status -> resolved (verified healthy)
+```
+
+`GET /incidents` then showed `status: resolved` with `resolved_at` populated, and
+`GET :8000/health` returned `{"status":"healthy"}` — confirming the container restart
+genuinely cleared the in-memory flag rather than the DB just claiming success.
+
+## Phase 6 — dashboard (`backend/static/`)
+
+### Starting point: the design was a prototype, not an app
+
+The existing `Annunciator — AI SRE Design System/ui_kits/incident-dashboard/` is a
+Claude Design export. It looks right, but it was not wired to anything:
+
+- It read a hardcoded `window.INCIDENTS` array from `data.js` (fake incidents for
+  `checkout-api`, `auth-gateway`, etc.), never the real `/incidents` API.
+- Its approve handler was `advance()` — a `setTimeout` chain that faked
+  `executing → verifying → resolved` locally. No HTTP request at all.
+- It loaded React, ReactDOM and Babel-standalone from `unpkg.com` and transpiled JSX
+  in the browser on every page load.
+
+### What was built instead
+
+`backend/static/index.html` — a single self-contained page, vanilla JS, no build
+step and no CDN, wired to the real API. The Annunciator design language is preserved
+exactly: the tokens (`tokens.css`) and the five self-hosted woff2/woff faces are
+vendored from the design export, with `@font-face` URLs rewritten to `./fonts/`.
+
+The CDN was dropped deliberately: this machine's network has been intermittent all
+along (it broke the Docker registry pull in Phase 0 and an `apt` run later), and a
+dashboard that silently renders nothing when unpkg is unreachable is not a dashboard.
+Self-hosting the fonts and dropping React removes every runtime network dependency
+except the app's own API.
+
+Design fidelity notes — the components were ported, not approximated: `StatusBadge`
+stays a coloured *word* rather than a filled pill, `Panel` has no radius and no
+shadow, `Divider` is a 1px rule, `Stepper` is six flush segments where a failed run
+replaces the remainder with one red segment, `DataReadout` keeps the 48px display
+figure with the half-size unit, and `ApproveButton` is the single sodium-amber fill
+in the whole page.
+
+Where real data forced a change from the mock:
+
+- Mock evidence was `[label, value]` pairs; real evidence is a flat list of strings,
+  so the two-column grid became single-column rows keeping the same hairline rhythm.
+- The mock's `metric` block (p95 latency, queue depth) has no real equivalent. Rather
+  than invent a fake metric, that slot shows the real `risk` field next to confidence.
+- Real statuses map onto the six-step bar as
+  `open→0, investigating→2, pending_approval→3, executing→4, verifying→5, resolved→6`.
+
+Two things added that the prototype had no need for:
+
+- **HTML escaping.** JSX escaped interpolated values automatically; building strings
+  for `innerHTML` does not. `root_cause` and `evidence` are model output, so
+  everything is passed through `esc()` first.
+- **The 409 path.** The prototype had no failure branch because it never made a
+  request. If approval is rejected the button now shows `REJECTED` and prints the
+  server's reason.
+
+### Verification (no browser available)
+
+The Chrome extension was not connected, so **the dashboard was not visually confirmed
+in a browser** — this is the one item in this phase not verified the way the spec's
+Part D Part 2 describes. In its place, the real script was extracted from the served
+page and exercised in Node:
+
+- `dash_test.js` — 65 assertions over the pure logic: status vocabulary for all seven
+  statuses, the polling gate, stepper geometry (including the failed branch and the
+  all-done resolved case), confidence formatting, badge markup, and XSS escaping.
+- `render_test.js` — 43 assertions feeding the **live `/incidents` payload** through
+  the real `renderList`/`renderDetail`, checking each incident renders its badge,
+  stepper, confidence, risk and full evidence list, that the approve button appears
+  for `pending_approval` and *only* then, and that the fixed-action disclosure is
+  always present.
+
+All assets serve correctly over HTTP: `/dashboard/` 200 (18.3 KB), `tokens.css` 200,
+woff2 200.
+
+### A real finding: the model hallucinated an RCA
+
+Incident #3's RCA claimed the container was being OOM-killed — "exit code 137",
+"3 restarts", "connection reset by peer" — none of which appear in the tool output.
+`get_container_status` had returned `restart_count: 0`, `exit_code: 0`,
+`status: running`. The model fabricated a plausible-sounding story around the one
+real signal it had (the recent alpine commit).
+
+This is a model-quality issue, not a pipeline bug — the loop gathered real evidence,
+enforced the 2-tool minimum, produced schema-valid JSON and persisted it correctly.
+Incident #4, same code, produced an accurate RCA. It is worth recording because it
+validates the Phase 5 design decision above: because remediation executes a fixed
+action and never the model's `recommended_action` text, a hallucinated RCA could not
+cause a wrong action to be taken. The blast radius of a bad diagnosis is a wrong
+*explanation*, not a wrong *action*.
+
+## Repository state
+
+The AISRE root is a git repo tracking `github.com/Raj-glitch-max/AISRE.git`. Two
+problems were found in what had been committed:
+
+1. **The venv was in the repo.** 5,868 of 5,885 tracked files were `backend/venv/`,
+   plus 2,800 `__pycache__` entries and the runtime `incidents.db`. Untracked via
+   `git rm -r --cached` (files untouched on disk) and a real `.gitignore` added — the
+   previous one was 0 bytes. The repo now tracks 11 source files plus the design
+   system.
+2. **`victim-app/` is committed as a gitlink, not as files.** It has its own
+   `.git` (from Phase 0, where the runbook required it for the commit-history tool),
+   so the parent repo stores it as mode `160000` pointing at commit `59d7e7c` — with
+   no `.gitmodules`. **Anyone cloning AISRE.git gets an empty `victim-app/`
+   directory**, which makes the project non-functional for a fresh clone. This is
+   left as an open decision because both fixes have a real cost — see the note handed
+   back with this phase.
+
 ## Current running state
 
-- `victim-app` Docker container: running, healthy, port 8000.
-- Backend uvicorn: running in background (`--reload`, port 9000), poller active.
-- `incidents.db` has 2 rows: #1 (Phase 1 test, resolved, no RCA) and #2 (Phase 2+3+4
-  test, resolved, full RCA populated).
-- `victim-app/` is git-committed; `backend/` still has no git repo (none requested).
-- `NVIDIA_API_KEY` is not persisted anywhere in this project's files — it must be
-  exported in-shell before running `nim_test.py` or `agent.py` again.
+- `victim-app` Docker container: running.
+- Backend uvicorn: running (`--reload`, port 9000), poller active, dashboard served
+  at `http://localhost:9000/dashboard/`.
+- `incidents.db` has 4 rows: #1–#3 resolved, **#4 left at `pending_approval`** so the
+  approve button can be exercised live in a browser.
+- `NVIDIA_API_KEY` is not persisted in any project file — export it in-shell before
+  running `agent.py`.
 
-Next: **Phase 5 — remediation + verification + the Atlas gate.**
+Next: **Phase 7+8 — deployment + README.**

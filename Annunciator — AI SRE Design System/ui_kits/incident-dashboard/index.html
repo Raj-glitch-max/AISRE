@@ -1,0 +1,74 @@
+<!-- @dsCard group="Incident Dashboard" viewport="800x760" name="Incident dashboard" subtitle="List and detail views — click a row, approve the remediation" -->
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>AI SRE — Incident dashboard</title>
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<script src="./data.js"></script>
+<style>body{padding:var(--space-xl) var(--space-lg)}.shell{max-width:var(--panel-max);margin:0 auto}</style>
+</head><body>
+<div id="root"></div>
+<script type="text/babel" src="./IncidentList.jsx"></script>
+<script type="text/babel" src="./IncidentDetail.jsx"></script>
+<script type="text/babel">
+const { Divider, MetaLabel } = window.AnnunciatorAISREDesignSystem_cada24;
+
+function Masthead() {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "var(--space-md)", padding: "0 var(--space-md) var(--space-lg)" }}>
+      <span style={{ width: 10, height: 26, background: "var(--signal-caution)", flex: "none" }}></span>
+      <span style={{ fontFamily: "var(--font-pixel)", fontSize: "var(--type-headline-sm-size)", letterSpacing: "0.15em", color: "var(--text-body)" }}>AI SRE</span>
+      <MetaLabel size="caption" style={{ marginLeft: "auto" }}>agent run 7f2a · 14:02:18 UTC</MetaLabel>
+    </div>
+  );
+}
+
+const SEQUENCE = ["executing", "verifying", "resolved"];
+
+function App() {
+  const [incidents, setIncidents] = React.useState(window.INCIDENTS);
+  const [openId, setOpenId] = React.useState(null);
+  const timers = React.useRef([]);
+
+  React.useEffect(() => () => timers.current.forEach(clearTimeout), []);
+
+  const advance = (id) => {
+    SEQUENCE.forEach((status, i) => {
+      const t = setTimeout(() => {
+        setIncidents((prev) =>
+          prev.map((inc) =>
+            inc.id === id
+              ? { ...inc, status, step: 4 + i, confidence: status === "resolved" ? 100 : inc.confidence }
+              : inc
+          )
+        );
+      }, i * 2600);
+      timers.current.push(t);
+    });
+  };
+
+  const open = openId && incidents.find((i) => i.id === openId);
+
+  return (
+    <div className="shell">
+      <Masthead />
+      <Divider />
+      <div style={{ paddingTop: "var(--space-lg)" }}>
+        {open ? (
+          <window.IncidentDetail
+            incident={open}
+            onBack={() => setOpenId(null)}
+            onApprove={() => advance(open.id)}
+          />
+        ) : (
+          <window.IncidentList incidents={incidents} onOpen={setOpenId} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body></html>

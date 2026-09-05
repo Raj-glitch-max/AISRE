@@ -1,0 +1,9 @@
+:root{
+/* Three states get motion. Everything else is an instant state flip. */
+--pulse-duration:2.4s; /* @kind other */
+--pulse-easing:cubic-bezier(0.45,0,0.55,1); /* @kind other */
+--pulse-opacity-floor:0.55; /* @kind other */
+--transition-none:0s; /* @kind other */
+}
+@keyframes annunciator-pulse{0%,100%{opacity:1}50%{opacity:0.55}}
+@media (prefers-reduced-motion:reduce){:root{--pulse-duration:0s /* @kind other */}}

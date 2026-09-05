@@ -1,0 +1,15 @@
+:root{
+/* 4px base — tighter than an 8px product scale; density is the register. */
+--space-xs:4px;
+--space-sm:8px;
+--space-md:12px;
+--space-lg:20px;
+--space-xl:32px;
+
+/* Structure. Zero radius is a fixed fact of the direction, not a scale. */
+--radius:0;
+--hairline:1px;
+--stepper-height:3px;
+--panel-max:760px;
+--measure:65ch;
+}

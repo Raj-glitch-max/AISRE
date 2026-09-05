@@ -1,12 +1,15 @@
 import asyncio
 import json
 import logging
+import os
 
-from fastapi import FastAPI
+from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 
 from database import Base, SessionLocal, engine
 from models import Incident
 from poller import run_poller
+from remediation import approve_and_remediate
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -42,3 +45,37 @@ def list_incidents():
         ]
     finally:
         db.close()
+
+
+@app.post("/incidents/{incident_id}/approve")
+def approve_incident(incident_id: int, background_tasks: BackgroundTasks):
+    # Checked here, synchronously, before the task is scheduled — not only inside
+    # approve_and_remediate(). BackgroundTasks runs after the response is already
+    # sent, so a guard living only in there would return "started" to an invalid
+    # request and surface the rejection nowhere but the server log.
+    db = SessionLocal()
+    try:
+        incident = db.query(Incident).filter(Incident.id == incident_id).first()
+        if not incident:
+            raise HTTPException(status_code=404, detail="incident not found")
+        if incident.status != "pending_approval":
+            raise HTTPException(
+                status_code=409,
+                detail=f"incident is not pending approval (status: {incident.status})",
+            )
+    finally:
+        db.close()
+
+    background_tasks.add_task(approve_and_remediate, incident_id)
+    return {"status": "approval received, remediation started"}
+
+
+# Mounted last: a mount at "/" would otherwise shadow the API routes above.
+app.mount(
+    "/dashboard",
+    StaticFiles(
+        directory=os.path.join(os.path.dirname(os.path.abspath(__file__)), "static"),
+        html=True,
+    ),
+    name="dashboard",
+)

@@ -1,0 +1,330 @@
+{
+  "plugins": [
+    "react",
+    "import"
+  ],
+  "rules": {
+    "react/forbid-elements": [
+      "warn",
+      {
+        "forbid": []
+      }
+    ],
+    "no-restricted-imports": [
+      "warn",
+      {
+        "patterns": [
+          {
+            "group": [
+              "components/controls/**",
+              "components/readout/**",
+              "components/status/**",
+              "components/surface/**",
+              "ui_kits/incident-dashboard/**"
+            ],
+            "message": "Import design-system components from 'index.js', not component internals."
+          }
+        ]
+      }
+    ],
+    "no-restricted-syntax": [
+      "warn",
+      {
+        "selector": "Literal[value=/#[0-9a-fA-F]{3,8}\\b/]",
+        "message": "Raw hex color — use a design-system color token via var()."
+      },
+      {
+        "selector": "Literal[value=/\\b\\d+px\\b/]",
+        "message": "Raw px value — use a design-system spacing token via var()."
+      },
+      {
+        "selector": "Literal[value=/font-family\\s*:\\s*(?!['\\\"]?(?:IBM Plex Mono|Departure Mono))/i]",
+        "message": "Font not provided by the design system. Available: IBM Plex Mono, Departure Mono."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='ApproveButton'] > JSXAttribute > JSXIdentifier[name!=/^(?:children|disabled|onClick|style|key|ref|className|style|children)$/]",
+        "message": "<ApproveButton> doesn't accept that prop. Declared props: children, disabled, onClick, style."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='DataReadout'] > JSXAttribute > JSXIdentifier[name!=/^(?:value|unit|label|align|style|key|ref|className|style|children)$/]",
+        "message": "<DataReadout> doesn't accept that prop. Declared props: value, unit, label, align, style."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='DataReadout'] > JSXAttribute[name.name='align'] > Literal[value!=/^(?:left|right|center)$/]",
+        "message": "<DataReadout> align must be one of 'left' | 'right' | 'center'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Divider'] > JSXAttribute > JSXIdentifier[name!=/^(?:inset|style|key|ref|className|style|children)$/]",
+        "message": "<Divider> doesn't accept that prop. Declared props: inset, style."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='MetaLabel'] > JSXAttribute > JSXIdentifier[name!=/^(?:children|size|variant|uppercase|as|style|key|ref|className|style|children)$/]",
+        "message": "<MetaLabel> doesn't accept that prop. Declared props: children, size, variant, uppercase, as, style."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='MetaLabel'] > JSXAttribute[name.name='size'] > Literal[value!=/^(?:sm|caption)$/]",
+        "message": "<MetaLabel> size must be one of 'sm' | 'caption'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='MetaLabel'] > JSXAttribute[name.name='variant'] > Literal[value!=/^(?:meta|caps)$/]",
+        "message": "<MetaLabel> variant must be one of 'meta' | 'caps'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Panel'] > JSXAttribute > JSXIdentifier[name!=/^(?:as|label|actions|flush|children|style|key|ref|className|style|children)$/]",
+        "message": "<Panel> doesn't accept that prop. Declared props: as, label, actions, flush, children, style."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='StatusBadge'] > JSXAttribute > JSXIdentifier[name!=/^(?:status|variant|label|on|style|key|ref|className|style|children)$/]",
+        "message": "<StatusBadge> doesn't accept that prop. Declared props: status, variant, label, on, style."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='StatusBadge'] > JSXAttribute[name.name='variant'] > Literal[value!=/^(?:nominal|caution|warning)$/]",
+        "message": "<StatusBadge> variant must be one of 'nominal' | 'caution' | 'warning'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='StatusBadge'] > JSXAttribute[name.name='on'] > Literal[value!=/^(?:panel|page)$/]",
+        "message": "<StatusBadge> on must be one of 'panel' | 'page'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Stepper'] > JSXAttribute > JSXIdentifier[name!=/^(?:steps|count|current|failed|labels|style|key|ref|className|style|children)$/]",
+        "message": "<Stepper> doesn't accept that prop. Declared props: steps, count, current, failed, labels, style."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Tooltip'] > JSXAttribute > JSXIdentifier[name!=/^(?:content|placement|children|style|key|ref|className|style|children)$/]",
+        "message": "<Tooltip> doesn't accept that prop. Declared props: content, placement, children, style."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Tooltip'] > JSXAttribute[name.name='placement'] > Literal[value!=/^(?:top|bottom)$/]",
+        "message": "<Tooltip> placement must be one of 'top' | 'bottom'."
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": [
+        "**/index.js"
+      ],
+      "rules": {
+        "no-restricted-imports": "off"
+      }
+    }
+  ],
+  "x-omelette": {
+    "components": {
+      "ApproveButton": {
+        "replaces": []
+      },
+      "DataReadout": {
+        "replaces": []
+      },
+      "Divider": {
+        "replaces": []
+      },
+      "MetaLabel": {
+        "replaces": []
+      },
+      "Panel": {
+        "replaces": []
+      },
+      "StatusBadge": {
+        "replaces": []
+      },
+      "Stepper": {
+        "replaces": []
+      },
+      "Tooltip": {
+        "replaces": []
+      }
+    },
+    "tokens": [
+      "--action-fill",
+      "--action-fill-hover",
+      "--action-ink",
+      "--color-border",
+      "--color-error",
+      "--color-neutral",
+      "--color-on-surface",
+      "--color-overlay",
+      "--color-primary",
+      "--color-secondary",
+      "--color-surface",
+      "--color-tertiary",
+      "--figures-tabular",
+      "--font-mono",
+      "--font-pixel",
+      "--hairline",
+      "--measure",
+      "--panel-black",
+      "--panel-border",
+      "--panel-ink",
+      "--panel-max",
+      "--panel-overlay",
+      "--panel-surface",
+      "--phosphor-nominal",
+      "--pulse-duration",
+      "--pulse-easing",
+      "--pulse-opacity-floor",
+      "--radius",
+      "--rule-hairline",
+      "--signal-caution",
+      "--signal-inert",
+      "--signal-nominal",
+      "--signal-warning",
+      "--sodium-caution",
+      "--sodium-caution-bright",
+      "--space-lg",
+      "--space-md",
+      "--space-sm",
+      "--space-xl",
+      "--space-xs",
+      "--stepper-height",
+      "--surface-float",
+      "--surface-page",
+      "--surface-panel",
+      "--surface-row-hover",
+      "--text-body",
+      "--text-meta",
+      "--text-on-caution",
+      "--transition-none",
+      "--type-body-md-family",
+      "--type-body-md-leading",
+      "--type-body-md-size",
+      "--type-body-md-tracking",
+      "--type-body-md-weight",
+      "--type-caption-family",
+      "--type-caption-leading",
+      "--type-caption-size",
+      "--type-caption-tracking",
+      "--type-caption-weight",
+      "--type-data-lg-family",
+      "--type-data-lg-leading",
+      "--type-data-lg-size",
+      "--type-data-lg-tracking",
+      "--type-data-lg-weight",
+      "--type-data-sm-family",
+      "--type-data-sm-leading",
+      "--type-data-sm-size",
+      "--type-data-sm-tracking",
+      "--type-data-sm-weight",
+      "--type-display-family",
+      "--type-display-leading",
+      "--type-display-size",
+      "--type-display-tracking",
+      "--type-display-weight",
+      "--type-headline-family",
+      "--type-headline-leading",
+      "--type-headline-size",
+      "--type-headline-sm-family",
+      "--type-headline-sm-leading",
+      "--type-headline-sm-size",
+      "--type-headline-sm-tracking",
+      "--type-headline-sm-weight",
+      "--type-headline-tracking",
+      "--type-headline-weight",
+      "--type-label-caps-family",
+      "--type-label-caps-leading",
+      "--type-label-caps-size",
+      "--type-label-caps-tracking",
+      "--type-label-caps-weight",
+      "--warm-grey",
+      "--warning-red"
+    ],
+    "tokenKinds": {
+      "--panel-black": "color",
+      "--panel-surface": "color",
+      "--panel-overlay": "color",
+      "--panel-border": "color",
+      "--panel-ink": "color",
+      "--warm-grey": "color",
+      "--sodium-caution": "color",
+      "--sodium-caution-bright": "color",
+      "--phosphor-nominal": "color",
+      "--warning-red": "color",
+      "--color-primary": "color",
+      "--color-secondary": "color",
+      "--color-tertiary": "color",
+      "--color-neutral": "color",
+      "--color-surface": "color",
+      "--color-overlay": "color",
+      "--color-border": "color",
+      "--color-on-surface": "color",
+      "--color-error": "color",
+      "--surface-page": "color",
+      "--surface-panel": "color",
+      "--surface-float": "color",
+      "--surface-row-hover": "color",
+      "--text-body": "font",
+      "--text-meta": "font",
+      "--text-on-caution": "font",
+      "--signal-nominal": "color",
+      "--signal-caution": "color",
+      "--signal-warning": "color",
+      "--signal-inert": "color",
+      "--rule-hairline": "color",
+      "--action-fill": "color",
+      "--action-fill-hover": "color",
+      "--action-ink": "color",
+      "--font-mono": "font",
+      "--font-pixel": "font",
+      "--type-display-family": "font",
+      "--type-display-size": "font",
+      "--type-display-weight": "font",
+      "--type-display-leading": "font",
+      "--type-display-tracking": "font",
+      "--type-headline-family": "font",
+      "--type-headline-size": "font",
+      "--type-headline-weight": "font",
+      "--type-headline-leading": "font",
+      "--type-headline-tracking": "font",
+      "--type-headline-sm-family": "font",
+      "--type-headline-sm-size": "font",
+      "--type-headline-sm-weight": "font",
+      "--type-headline-sm-leading": "font",
+      "--type-headline-sm-tracking": "font",
+      "--type-body-md-family": "font",
+      "--type-body-md-size": "font",
+      "--type-body-md-weight": "font",
+      "--type-body-md-leading": "font",
+      "--type-body-md-tracking": "font",
+      "--type-data-lg-family": "font",
+      "--type-data-lg-size": "font",
+      "--type-data-lg-weight": "font",
+      "--type-data-lg-leading": "font",
+      "--type-data-lg-tracking": "font",
+      "--type-data-sm-family": "font",
+      "--type-data-sm-size": "font",
+      "--type-data-sm-weight": "font",
+      "--type-data-sm-leading": "font",
+      "--type-data-sm-tracking": "font",
+      "--type-caption-family": "font",
+      "--type-caption-size": "font",
+      "--type-caption-weight": "font",
+      "--type-caption-leading": "font",
+      "--type-caption-tracking": "font",
+      "--type-label-caps-family": "font",
+      "--type-label-caps-size": "font",
+      "--type-label-caps-weight": "font",
+      "--type-label-caps-leading": "font",
+      "--type-label-caps-tracking": "font",
+      "--figures-tabular": "other",
+      "--space-xs": "spacing",
+      "--space-sm": "spacing",
+      "--space-md": "spacing",
+      "--space-lg": "spacing",
+      "--space-xl": "spacing",
+      "--radius": "radius",
+      "--hairline": "spacing",
+      "--stepper-height": "spacing",
+      "--panel-max": "spacing",
+      "--measure": "spacing",
+      "--pulse-duration": "other",
+      "--pulse-easing": "other",
+      "--pulse-opacity-floor": "other",
+      "--transition-none": "other"
+    },
+    "fontFamilies": [
+      "Departure Mono",
+      "IBM Plex Mono"
+    ]
+  }
+}
