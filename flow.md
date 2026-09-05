@@ -483,14 +483,107 @@ problems were found in what had been committed:
    usable: victim-app source, all nine backend modules, and the dashboard (with
    fonts and tokens) all present; `venv/` and `incidents.db` correctly absent.
 
+## Independent confirmation: the dashboard actually works in a browser
+
+Between the last update and this one, three real screenshots arrived
+(`files/dashboard-{list,detail,resolved}.png`, now copied to `docs/`) showing the
+dashboard running at `localhost:9000/dashboard/` in an actual browser — the list view
+with the live AWAITING count, the detail view with stepper/confidence/risk/evidence
+rendering correctly, and the resolved state with "Verified healthy at 20:14:47 UTC."
+This closes the gap flagged at the end of Phase 6: the Chrome extension was never
+connected in this session, so the dashboard's *visual* correctness had only been
+inferred from 108 Node assertions, never actually seen. It's now confirmed working,
+just not by me directly.
+
+## Phase 7 (partial) — auto-trigger investigation
+
+### The one code change
+
+Per spec: `backend/poller.py` now starts `agent.investigate()` in a daemon thread
+immediately after opening an incident, so nobody has to SSH in and run `python
+agent.py N` by hand. `_investigate_safely()` wraps the call — if `investigate()`
+throws (NVIDIA down, rate-limited), the incident is marked `failed` instead of
+sitting at `investigating` forever with nothing watching it.
+
+### A regression the spec didn't anticipate, found and fixed before it shipped
+
+`agent.py` built its `OpenAI` client at **import time**
+(`client = OpenAI(api_key=os.environ["NVIDIA_API_KEY"])`, module level). Once
+`poller.py` imports `investigate` — and `main.py` always imports `poller.py` — a
+missing `NVIDIA_API_KEY` now crashed the **entire app** on startup, not just the
+investigation path. Confirmed directly:
+
+```
+$ unset NVIDIA_API_KEY && python -c "import main"
+KeyError: 'NVIDIA_API_KEY'
+```
+
+This is a real problem for exactly the deployment scenario Part D describes: a typo
+in `/etc/ai-sre/backend.env`'s path, or the file missing its permissions, would
+crash-loop the *whole service* — no dashboard, no `/incidents`, no Phase 1 health
+monitoring at all — rather than degrading gracefully to "the poller and dashboard
+work, investigations just fail." Fixed with a lazy client (`_get_client()`,
+instantiated on first use, not at import). Re-verified the same test now imports
+clean without the key, and that `_investigate_safely`'s existing try/except still
+catches a missing-key failure and marks the incident `failed` correctly.
+
+### End-to-end verification, exactly as the spec's own bar requires
+
+"Test this locally before touching AWS... the incident should walk itself from
+`open` through `pending_approval` with zero manual commands." Broke victim-app,
+touched nothing else:
+
+```
+open -> investigating (immediately)
+... 85 seconds, zero manual intervention ...
+investigating -> pending_approval
+```
+
+Confirmed the poller's own 5-second health-check loop never stalled during the
+85-second investigation — log timestamps stayed exactly 5.00-5.04s apart throughout,
+proving the background thread genuinely didn't block the event loop. Approved the
+resulting incident (#5) and the full remediation cycle completed normally
+(`executing -> verifying -> resolved`, `/health` genuinely healthy afterward).
+
+### Optional demo-trigger endpoint — built, not skipped
+
+The spec marks `POST /demo/trigger-incident` as optional ("genuinely optional — the
+project is complete and demoable without it"). Built it anyway, plus the button the
+spec only described in passing ("a small button in `index.html`"), because half of a
+feature — a backend endpoint a recruiter has no way to actually click — isn't a
+complete demo path. The button (`BREAK VICTIM-APP`, top-right of the masthead) is
+deliberately a quiet outlined ghost button, never the amber fill — that fill is
+reserved for the approve action alone, per the design system's own stated rule.
+Verified: clicking triggers a real `/admin/break`, the poller and auto-trigger take
+it from there exactly as the manual `curl` path does (incident #6, confirmed
+`investigating` within 5s of the click).
+
+### What Phase 7 still needs, and why it's paused here
+
+Everything above is local code, fully verified. The rest of Phase 7 — provisioning
+an EC2 instance, an Elastic IP, security groups, DNS for `sre.rajpatil.dev`, Caddy,
+and a systemd unit — requires AWS console/CLI access, SSH access to a real server,
+and DNS control, none of which this environment has. That work is paused pending a
+decision on how to proceed (this session has no path to provision or reach a real
+server on its own).
+
+The README supplied in `files/README.md` states `**Live:** https://sre.rajpatil.dev/
+dashboard/` and a publicly-curlable `/demo/trigger-incident` — neither is true yet.
+It has **not** been copied into the repo root as-is, to avoid committing a false
+claim; the screenshots it references have been staged in `docs/` since they're
+accurate regardless of deployment status.
+
 ## Current running state
 
 - `victim-app` Docker container: running.
-- Backend uvicorn: running (`--reload`, port 9000), poller active, dashboard served
-  at `http://localhost:9000/dashboard/`.
-- `incidents.db` has 4 rows: #1–#3 resolved, **#4 left at `pending_approval`** so the
-  approve button can be exercised live in a browser.
+- Backend uvicorn: running (`--reload`, port 9000), poller active (now with
+  auto-trigger), dashboard served at `http://localhost:9000/dashboard/`, including
+  the new BREAK VICTIM-APP button.
+- `incidents.db` has 6 rows: #1–#5 resolved, **#6 mid-investigation** (opened via the
+  new demo-trigger endpoint during this verification pass).
 - `NVIDIA_API_KEY` is not persisted in any project file — export it in-shell before
-  running `agent.py`.
+  starting the backend now (not just before running `agent.py` — see the lazy-client
+  fix above for why that distinction now matters).
 
-Next: **Phase 7+8 — deployment + README.**
+Next: **finish Phase 7 (actual AWS deployment — needs access this session doesn't
+have) + Phase 8 (README, once its live-URL claim is either true or removed).**

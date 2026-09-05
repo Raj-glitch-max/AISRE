@@ -224,6 +224,23 @@
   button.approve:hover:not(:disabled) { background: var(--action-fill-hover); }
   button.approve:disabled { background: var(--surface-float); color: var(--text-meta); cursor: default; }
 
+  /* Ghost button, deliberately quiet — the approve button is the only fill
+     in this system. This one exists for a recruiter without a terminal, not
+     as a second call to action. */
+  button.trigger-demo {
+    appearance: none;
+    background: none;
+    border: var(--hairline) solid var(--rule-hairline);
+    color: var(--text-meta);
+    font-family: var(--font-pixel);
+    font-size: var(--type-label-caps-size);
+    letter-spacing: var(--type-label-caps-tracking);
+    padding: var(--space-xs) var(--space-sm);
+    cursor: pointer;
+  }
+  button.trigger-demo:hover:not(:disabled) { color: var(--text-body); border-color: var(--text-meta); }
+  button.trigger-demo:disabled { opacity: 0.5; cursor: default; }
+
   .inflight {
     display: inline-flex;
     align-items: center;
@@ -244,7 +261,8 @@
   <div class="masthead">
     <span class="bar"></span>
     <span class="wordmark">AI SRE</span>
-    <span class="meta caption push-right" id="clock"></span>
+    <button class="trigger-demo push-right" id="trigger-btn">BREAK VICTIM-APP</button>
+    <span class="meta caption" id="clock"></span>
   </div>
   <hr class="divider">
   <div style="padding-top: var(--space-lg)">
@@ -519,9 +537,28 @@ function tickClock() {
     new Date().toUTCString().slice(17, 25) + " UTC";
 }
 
+async function triggerDemo(btn) {
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = "BREAKING…";
+  try {
+    await fetch("/demo/trigger-incident", { method: "POST" });
+  } finally {
+    // Re-enable after a beat — the poller needs ~10s to notice and open the
+    // incident; hammering this button before then would just no-op anyway
+    // since the service is already broken.
+    setTimeout(() => { btn.disabled = false; btn.textContent = original; }, 10000);
+  }
+  if (openId === null) {
+    await fetchIncidents();
+    renderList();
+  }
+}
+
 (async function init() {
   tickClock();
   setInterval(tickClock, 1000);
+  document.getElementById("trigger-btn").addEventListener("click", (e) => triggerDemo(e.target));
   await fetchIncidents();
   renderList();
   // Refresh the list while it's the visible view; detail has its own poller.

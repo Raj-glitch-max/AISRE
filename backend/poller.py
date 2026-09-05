@@ -1,9 +1,11 @@
 import asyncio
 import logging
+import threading
 from datetime import datetime
 
 import httpx
 
+from agent import investigate
 from database import SessionLocal
 from models import Incident
 
@@ -14,6 +16,26 @@ RESOLVE_AFTER_SUCCESSES = 2
 logger = logging.getLogger("poller")
 
 active_incident_id = None
+
+
+def _investigate_safely(incident_id):
+    """Runs in its own thread. If agent.investigate() throws — NVIDIA API down,
+    rate-limited, whatever — the incident must not sit at 'investigating' forever
+    with nothing watching it. On a laptop you'd notice and rerun by hand; on a
+    server, nobody's watching."""
+    try:
+        investigate(incident_id)
+    except Exception as e:
+        logger.error("investigation failed for incident %s: %s", incident_id, e)
+        try:
+            db = SessionLocal()
+            incident = db.query(Incident).filter(Incident.id == incident_id).first()
+            if incident and incident.status == "investigating":
+                incident.status = "failed"
+                db.commit()
+            db.close()
+        except Exception:
+            logger.error("could not even mark incident %s as failed", incident_id)
 
 
 async def run_poller():
@@ -39,6 +61,11 @@ async def run_poller():
                         db.refresh(incident)
                         active_incident_id = incident.id
                         logger.error("Incident %s opened: victim-app unhealthy", incident.id)
+                        threading.Thread(
+                            target=_investigate_safely,
+                            args=(incident.id,),
+                            daemon=True,
+                        ).start()
                 else:
                     consecutive_successes += 1
                     if active_incident_id is not None and consecutive_successes >= RESOLVE_AFTER_SUCCESSES:

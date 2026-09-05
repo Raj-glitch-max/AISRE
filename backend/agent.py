@@ -30,10 +30,22 @@ VICTIM_REPO_PATH = os.path.join(
 )
 
 
-client = OpenAI(
-    base_url="https://integrate.api.nvidia.com/v1",
-    api_key=os.environ["NVIDIA_API_KEY"],
-)
+_client = None
+
+
+def _get_client():
+    # Built lazily, not at import time: poller.py now imports investigate() so
+    # it can auto-trigger on incident creation, and poller.py is imported by
+    # main.py unconditionally. A missing NVIDIA_API_KEY must fail an
+    # investigation, not take down the whole app (dashboard, /incidents,
+    # Phase 1's own health monitoring) before it can even start.
+    global _client
+    if _client is None:
+        _client = OpenAI(
+            base_url="https://integrate.api.nvidia.com/v1",
+            api_key=os.environ["NVIDIA_API_KEY"],
+        )
+    return _client
 
 
 SYSTEM_PROMPT = """
@@ -278,7 +290,7 @@ def investigate(incident_id: int) -> dict:
             else "auto"
         )
 
-        response = client.chat.completions.create(
+        response = _get_client().chat.completions.create(
             model=MODEL,
             messages=[
                 {

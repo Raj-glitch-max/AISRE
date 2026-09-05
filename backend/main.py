@@ -3,6 +3,7 @@ import json
 import logging
 import os
 
+import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 
@@ -68,6 +69,16 @@ def approve_incident(incident_id: int, background_tasks: BackgroundTasks):
 
     background_tasks.add_task(approve_and_remediate, incident_id)
     return {"status": "approval received, remediation started"}
+
+
+@app.post("/demo/trigger-incident")
+def demo_trigger():
+    # A non-technical visitor can't run curl against the loopback-only admin
+    # endpoint directly (nor should they be able to — victim-app stays internal).
+    # This proxies the one safe action: break it, let the auto-trigger + agent
+    # take it from there.
+    httpx.post("http://localhost:8000/admin/break", timeout=3)
+    return {"status": "triggered"}
 
 
 # Mounted last: a mount at "/" would otherwise shadow the API routes above.
