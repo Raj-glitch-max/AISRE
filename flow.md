@@ -462,13 +462,26 @@ problems were found in what had been committed:
    `git rm -r --cached` (files untouched on disk) and a real `.gitignore` added — the
    previous one was 0 bytes. The repo now tracks 11 source files plus the design
    system.
-2. **`victim-app/` is committed as a gitlink, not as files.** It has its own
-   `.git` (from Phase 0, where the runbook required it for the commit-history tool),
-   so the parent repo stores it as mode `160000` pointing at commit `59d7e7c` — with
-   no `.gitmodules`. **Anyone cloning AISRE.git gets an empty `victim-app/`
-   directory**, which makes the project non-functional for a fresh clone. This is
-   left as an open decision because both fixes have a real cost — see the note handed
-   back with this phase.
+2. **`victim-app/` was committed as a gitlink, not as files.** It had its own `.git`
+   (from Phase 0, where the runbook required it for the commit-history tool), so the
+   parent repo stored it as mode `160000` pointing at commit `59d7e7c` — with no
+   `.gitmodules`. Anyone cloning AISRE.git got an empty `victim-app/` directory,
+   making the project non-functional from a fresh clone.
+
+   **Fixed via `git subtree add`**, which imports the files *and* the history rather
+   than just copying the files in: victim-app's two original commits (`0d57b89`,
+   `59d7e7c`) are now reachable inside AISRE's history, and the nested `.git` is
+   gone. A submodule was considered and rejected — it would have kept victim-app
+   independently versioned at the cost of a second repo and a
+   `git clone --recursive` footgun for anyone browsing the project.
+
+   The agent's `get_recent_commits` tool still works: with no nested `.git`, `git log`
+   from `victim-app/` resolves to the parent repo, which now carries both victim-app's
+   original commits and the ongoing project history. Verified after the change.
+
+   A fresh `git clone` was then run end-to-end to confirm the repo is actually
+   usable: victim-app source, all nine backend modules, and the dashboard (with
+   fonts and tokens) all present; `venv/` and `incidents.db` correctly absent.
 
 ## Current running state
 
