@@ -1,0 +1,310 @@
+# Flow log — Phase 0, 1, 2, 3, 4
+
+## Starting state (before any of this)
+
+The runbook assumed a folder layout of `ai-sre/victim-app/` + `ai-sre/backend/` with
+file contents already sitting in a spec doc. Neither was true on disk:
+
+- `victim_app/` (underscore) already existed, but it's not a scratch project — it's a
+  real, separate GitHub repo called **atlas** (`Raj-glitch-max/atlas`, clean tree,
+  tracking `origin/main`, 25+ merged PRs). It's a certificate issuance/revocation
+  system with no relation to the `/health` / `/orders` / `/admin/break` toy app the
+  runbook describes.
+- `backend/` existed but was empty except for an unpopulated `venv/`.
+- No spec doc with the actual source could be found on the filesystem or in connected
+  Google Drive.
+
+**Decision:** leave `victim_app/` (the real atlas repo) untouched, and build the toy
+app fresh in a new `victim-app/` (hyphen) folder — which is also the exact name the
+runbook itself uses. `backend/` was populated in place since it was already empty.
+This was confirmed with the user before writing any code.
+
+## Phase 0 — victim-app
+
+### What was built
+
+`victim-app/main.py` — FastAPI app with exactly the four endpoints the runbook
+checks, nothing else (per "don't add anything the spec didn't ask for"):
+
+- `GET /health` — returns `{"status": "healthy"}`, or 500 `dependency unavailable`
+  when broken.
+- `GET /orders` — returns a 2-item hardcoded order list, or 500 `connection refused`
+  when broken.
+- `POST /admin/break` / `POST /admin/fix` — flip a module-level `is_broken` flag.
+
+Every handler calls `logger.info(...)` on the healthy path and `logger.error(...)`
+on the broken path *before* raising `HTTPException`, so `docker logs` gets an
+unambiguous INFO/ERROR split regardless of how uvicorn's own access logging is
+configured — this is what row 6 checks for.
+
+`Dockerfile` + `requirements.txt` + `.gitignore` / `.dockerignore` round out the repo.
+
+### Failure: Docker build failed TLS verification (not in the runbook's table)
+
+```
+docker build -t victim-app .
+→ x509: certificate has expired or is not yet valid:
+  current time 2026-09-04T23:31:27+05:30 is before 2026-09-05T00:51:31Z
+```
+
+This isn't one of the anticipated row-2 failures (wrong folder, pip typo). Diagnosis:
+
+```
+timedatectl status
+→ System clock synchronized: no
+  NTP service: active   (systemd-timesyncd running but stuck at "Idle")
+```
+
+The host clock was running behind real time, so Docker Hub's registry cert (issued
+very recently) looked "not yet valid" from the client's point of view. This isn't
+specific to this task — it would break any strict TLS validation on the box until
+fixed.
+
+Two paths existed: fix the clock (needs sudo, which wasn't available
+non-interactively — `sudo -n true` failed), or route around the registry pull
+entirely. `docker images` showed `python:3.12-alpine` already cached locally (from
+unrelated prior work), so the fix was:
+
+- `Dockerfile`: `FROM python:3.12-slim` → `FROM python:3.12-alpine` (already cached,
+  no registry pull needed).
+- `requirements.txt`: `uvicorn[standard]` → `uvicorn` (plain). Alpine uses musl libc,
+  not glibc; the `[standard]` extra pulls in uvloop/httptools which are C extensions
+  that may not have musl wheels. Plain `uvicorn` is pure Python (click + h11), so it
+  installs cleanly on alpine with zero risk of a compiler-toolchain error. In the
+  end pydantic-core *did* have a prebuilt musllinux wheel available, so this was a
+  conservative choice rather than a strictly necessary one — but it avoided
+  introducing a second unknown failure mode while already debugging one.
+
+The user's system clock is still unsynced as of this writing (fixing it needs a
+password we don't have) — flagging in case it causes trouble elsewhere later.
+
+### Verification (all rows matched)
+
+| Row | Command | Result |
+|---|---|---|
+| 1 | `git init && git add . && git commit` | Clean commit, 5 files |
+| 2 | `docker build -t victim-app .` (alpine) | Built cleanly |
+| 3 | `docker run -d -p 8000:8000 --name victim-app victim-app` | Container ID printed |
+| 4 | `curl /health`, `curl /orders` | `{"status":"healthy"}`, 2-item list |
+| 5 | `POST /admin/break` then health/orders | Both 500, `dependency unavailable` / `connection refused` |
+| 6 | `docker logs victim-app` | Clean INFO→ERROR split at the break point |
+| 7 | `POST /admin/fix` then health | Back to `{"status":"healthy"}` |
+
+The Dockerfile/requirements fix was committed separately after verification
+(`fix: use alpine base + plain uvicorn to avoid registry TLS clock issue`), keeping
+row 1's "clean commit" intact as the actual first commit.
+
+## Phase 1 — health poller + incident model
+
+### What was built
+
+- `backend/database.py` — SQLAlchemy engine/session against `sqlite:///./incidents.db`.
+- `backend/models.py` — `Incident(id, status, opened_at, resolved_at)`. Uses
+  `default=datetime.utcnow` (not `datetime.now(timezone.utc)`) deliberately — this
+  matches the runbook's own "expected noise" note about the `datetime.utcnow()`
+  deprecation warning on Python 3.12, so seeing that warning is confirmation of
+  correct behavior, not a bug.
+- `backend/poller.py` — `run_poller()`: polls `TARGET_URL = "http://localhost:8000/health"`
+  every 5s via `httpx.AsyncClient`. On failure, opens a new incident **only if**
+  `active_incident_id is None` — this check is nested strictly inside the
+  `if not healthy:` branch (poller.py:33-41). The runbook calls out an indentation
+  slip that hoists this guard out of the failure branch as "the single most common
+  bug in this file," so this nesting was re-read line-by-line against the spec
+  before moving on. On success, a `consecutive_successes` counter increments and
+  resolves the open incident once it reaches 2.
+- `backend/main.py` — `GET /incidents`, and starts the poller via
+  `@app.on_event("startup")`. This is the deprecated-but-functional style the
+  runbook's other "expected noise" note references (FastAPI 0.115.0 still runs it
+  fine) — used deliberately, not by accident.
+
+### Failure: none outside the runbook
+
+`pip install` had a couple of transient `Connection refused` retries against PyPI
+at the very start, which pip retried automatically and then succeeded — not the
+clock issue (PyPI's certs weren't in the affected window), just a momentary network
+hiccup. No action needed.
+
+### Verification (all rows matched, with log evidence)
+
+| Row | Command | Result |
+|---|---|---|
+| 1 | `pip install -r requirements.txt` | Installed cleanly |
+| 2 | `uvicorn main:app --reload --port 9000` | Running on :9000, poller hitting `/health` every 5s |
+| 3 | `curl :9000/incidents` (healthy) | `[]` |
+| 4 | break victim-app, wait 13s, `curl :9000/incidents` | Exactly 1 incident, `"status":"open"` |
+| 5 | fix victim-app, wait 14s, `curl :9000/incidents` | Same incident, `"status":"resolved"`, `resolved_at` populated |
+
+Backend log timeline for the break→fix cycle, confirming the guard held across
+repeated failures and resolution required exactly 2 consecutive successes:
+
+```
+23:40:57  GET /health → 500          ERROR Incident 1 opened: victim-app unhealthy
+23:41:02  GET /health → 500          (no new incident — guard held)
+23:41:07  GET /health → 500          (no new incident — guard held)
+23:41:12  GET /health → 500          (no new incident — guard held)
+23:41:17  GET /health → 500          (no new incident — guard held)
+23:41:22  GET /health → 200          (1st consecutive success)
+23:41:27  GET /health → 200          (2nd consecutive success)  INFO Incident 1 resolved
+```
+
+## Interlude — mid-session service restart
+
+Between Phase 1 and Phase 2 the `victim-app` container exited (255) and the backend
+uvicorn process died — evidence pointed to a Docker daemon or machine restart in the
+background (container `CREATED 18h ago`, `Exited 14h ago` when checked). Both were
+simply restarted (`docker start victim-app`; re-launch `uvicorn main:app --reload
+--port 9000`) — the SQLite file had persisted, so incident #1's resolved record came
+back intact with no data loss. No code changes needed.
+
+Also flagged separately: an attempt to fix the earlier clock-sync issue via
+`apt install chrony` failed (the network couldn't reach most apt mirrors — DNS was
+returning the local gateway IP for many hostnames, and one request got redirected to
+a router login page, consistent with an intermittent captive-portal-style network
+rather than a clean outage). That attempt left `systemd-timesyncd` stopped (though
+still installed) with no replacement running. This is noted but not fixed — it
+doesn't block anything in this project, since all package installs here go through
+PyPI directly (unaffected) rather than Docker Hub or apt.
+
+## Phase 2 — SRE tools (`backend/tools.py`)
+
+Three plain Python functions, no model involvement:
+
+- `get_container_status(container_name)` — `docker inspect`, returns running state,
+  exit code, restart count, start time.
+- `get_recent_logs(container_name, lines)` — `docker logs --tail N`, stdout+stderr
+  combined.
+- `get_recent_commits(repo_path, count)` — `git log` against `victim-app/` (the repo
+  git-init'd in Phase 0), parsed into structured `{hash, author, date, message}` dicts.
+
+All three return structured dicts/strings/lists rather than raising — errors (docker
+not found, container missing, not a git repo) come back as `{"error": "..."}` so the
+agent loop always gets *something* parseable instead of a crash.
+
+**Verification:** `python tools.py` standalone — all three returned real data
+(`running: True`, actual victim-app log lines, the two Phase-0 commits from
+`victim-app/`'s git history). No model involved at this stage, per the spec's
+instruction not to wire tools to the model until each works standalone.
+
+## Phase 3 — NVIDIA NIM agent loop (`backend/agent.py`)
+
+### Provider swap
+
+Per spec, this build uses NVIDIA NIM's OpenAI-compatible endpoint
+(`https://integrate.api.nvidia.com/v1`) via the standard `openai` Python package
+instead of the Anthropic SDK. No `ANTHROPIC_API_KEY` / `anthropic` package anywhere
+in this project.
+
+The key itself was shared directly in chat (a development key the user says they
+manage/rotate). It was **not** written into any source file — `agent.py` and
+`nim_test.py` both read it from `os.environ["NVIDIA_API_KEY"]`, matching the spec's
+own instruction ("Do NOT put the key directly inside Python code").
+
+### Failure: the spec's default model (`deepseek-ai/deepseek-v4-pro-0813`) doesn't work on this account
+
+`GET /v1/models` confirmed the key is valid and that model is listed in NVIDIA's
+general catalog. But every `POST /chat/completions` call against it hung completely
+— no response, not even an error, for 100+ seconds (verified twice, once via the
+Python client, once via raw `curl --max-time 100`). This is different from a normal
+failure mode:
+
+- A genuinely unavailable/unprovisioned model returns a **fast 404**
+  (`"Function '...' Not Found for account '...'"` — confirmed with
+  `google/gemma-2b` and `mistralai/mistral-7b-instruct-v0.3`, both instant).
+  So the hang isn't "model not entitled."
+- A busy model returns a **fast 503** (`"Service temporarily overloaded"` — this is
+  exactly what `nvidia/nemotron-3-ultra-550b-a55b` returned on its first attempt, in
+  under 24s, then succeeded on retry).
+
+`deepseek-ai/deepseek-v4-pro-0813` did neither — it just never responded. That looks
+like a broken/stuck backing deployment on NVIDIA's side for this specific model on
+this account, not something fixable from this end.
+
+**Fix:** switched the default model (both `nim_test.py` and `agent.py`) to
+`nvidia/nemotron-3-ultra-550b-a55b` — the model the user's own working example used.
+Verified independently before touching the agent:
+1. Plain chat completion — real response, ~20s.
+2. Tool-calling with `tool_choice: "required"` — correct `tool_calls` array,
+   correct function name/arguments, `finish_reason: "tool_calls"`.
+
+The model stays fully configurable via `NIM_MODEL` env var exactly as the spec
+requires, so switching again later (e.g. if NVIDIA fixes the deepseek endpoint, or
+changes the free catalog) is a one-line change, not a code change.
+
+### Agent loop implementation
+
+`agent.py` matches the spec's design as given:
+
+- Round 1 forces `tool_choice: "required"`; later rounds use `"auto"`.
+- Assistant messages round-tripped via `message.model_dump(exclude_none=True)` so
+  tool-call history stays intact across rounds.
+- `executed_tool_count` is tracked in Python, independently of what the system
+  prompt asks for — the agent will not accept a final RCA below 2 executed tools,
+  regardless of what the model claims. This is the "program-level enforcement, not
+  just prompt-level" the spec calls out.
+- `MAX_ROUNDS = 5` caps runaway loops; hitting the cap without a valid RCA sets
+  `status = "failed"` rather than looping forever.
+- JSON parsing tolerates ```json fences the model might wrap around its answer.
+
+One necessary addition beyond the literal spec: `backend/main.py`'s `GET /incidents`
+handler only serialized the original 4 fields (`id`, `status`, `opened_at`,
+`resolved_at`). It was updated to also return `service_name`, `root_cause`,
+`confidence`, `evidence` (JSON-decoded back into a list), `recommended_action`, and
+`risk` — otherwise the RCA would be persisted in SQLite but invisible through the
+API, which the spec's own completion criteria require checking via `curl`.
+
+## Phase 4 — structured RCA + persistence
+
+### Migration (`backend/migrate_db.py`)
+
+Added `service_name, root_cause, confidence, evidence, recommended_action, risk` via
+idempotent `ALTER TABLE ... ADD COLUMN` (skips columns that already exist), rather
+than `create_all()` (which only creates missing *tables*, not missing *columns* on
+an existing table) or dropping `incidents.db` (which would have thrown away
+incident #1 from Phase 1 testing). Ran once, verified via
+`inspect(engine).get_columns("incidents")` — all 10 columns present, incident #1's
+row untouched.
+
+### End-to-end run (incident #2)
+
+1. `POST /admin/break` → Phase 1 poller opened incident #2 (`status: "open"`)
+   ~5s later, exactly as in Phase 1.
+2. `python agent.py 2`:
+   - Round 1: model requested all three tools in a single response (valid parallel
+     tool-calling — `get_container_status`, `get_recent_logs`, `get_recent_commits`
+     all executed, `executed_tool_count = 3`).
+   - Round 2: model returned a valid structured RCA directly (no more tools needed).
+   - RCA correctly identified `/admin/break` itself as the root cause by correlating
+     the admin log line with the subsequent health failures — confidence 0.95,
+     risk `medium`.
+3. `GET /incidents` confirmed the RCA fields were persisted in SQLite (not just
+   printed to the terminal) and `status` was `pending_approval`.
+4. `POST /admin/fix` → waited ~14s → `GET /incidents` showed incident #2 as
+   `status: "resolved"`, `resolved_at` populated. This is Phase 1's poller acting
+   independently of the agent (its own in-memory `active_incident_id` guard doesn't
+   know or care about the agent's `pending_approval` status) — and it correctly
+   flipped only `status`/`resolved_at`, leaving all the RCA fields the agent wrote
+   untouched. This is the state-machine handoff the spec describes
+   (`open → investigating → pending_approval`, then Phase 1 independently drives
+   `→ resolved`), and it worked without any glue code between the two systems.
+
+### Completion criteria (Part L) — all satisfied
+
+Every item in the spec's checklist was verified directly against real output during
+this run: Phase 0/1 still work, RCA fields exist and migrated cleanly, the NVIDIA
+key and (substituted) model work, all three tools work standalone and via the
+agent, at least 2 tools were executed (3, in fact), the RCA is schema-valid and
+persisted, and the incident correctly reached `pending_approval` then `resolved`.
+
+**Phase 2+3+4 done.**
+
+## Current running state
+
+- `victim-app` Docker container: running, healthy, port 8000.
+- Backend uvicorn: running in background (`--reload`, port 9000), poller active.
+- `incidents.db` has 2 rows: #1 (Phase 1 test, resolved, no RCA) and #2 (Phase 2+3+4
+  test, resolved, full RCA populated).
+- `victim-app/` is git-committed; `backend/` still has no git repo (none requested).
+- `NVIDIA_API_KEY` is not persisted anywhere in this project's files — it must be
+  exported in-shell before running `nim_test.py` or `agent.py` again.
+
+Next: **Phase 5 — remediation + verification + the Atlas gate.**
