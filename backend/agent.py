@@ -278,6 +278,7 @@ def investigate(incident_id: int) -> dict:
     final_status = "failed"
 
     executed_tool_count = 0
+    transcript = []
 
     for round_num in range(1, MAX_ROUNDS + 1):
 
@@ -342,6 +343,9 @@ def investigate(incident_id: int) -> dict:
                 )
 
                 executed_tool_count += 1
+                transcript.append(
+                    {"tool": tool_name, "input": tool_input, "result": result}
+                )
 
                 print(
                     f"[incident {incident_id}] "
@@ -426,6 +430,8 @@ def investigate(incident_id: int) -> dict:
             "recommended_action"
         )
         incident.risk = final_rca.get("risk")
+
+    incident.tool_transcript = json.dumps(transcript)
 
     incident.status = final_status
 

@@ -6,6 +6,7 @@ from datetime import datetime
 
 import httpx
 
+from atlas_sdk import AtlasClient, Decision, AtlasError
 from database import SessionLocal
 from models import Incident
 
@@ -14,6 +15,11 @@ HEALTH_URL = "http://localhost:8000/health"
 VERIFY_WAIT_SECONDS = 8
 VERIFY_ATTEMPTS = 3
 VERIFY_RETRY_INTERVAL = 3
+
+atlas = AtlasClient("https://atlas-production-c457.up.railway.app")
+
+ATLAS_PRINCIPAL = "spiffe://ai-sre.local/system/approval-gate"
+ATLAS_DELEGATE = "spiffe://ai-sre.local/agent/remediation-executor"
 
 
 class IncidentNotPendingApproval(Exception):
@@ -37,6 +43,42 @@ def _restart_container(container_name: str) -> dict:
         return {"success": False, "error": result.stderr.strip()}
 
     return {"success": True}
+
+
+def _gated_restart(incident_id: int) -> dict:
+    """Fail-closed by construction: every exit that isn't an explicit ACCEPT
+    followed by a real restart attempt lands on 'failed'. There is no path
+    that proceeds to docker restart without a verified capability."""
+    try:
+        grant = atlas.issue(
+            principal=ATLAS_PRINCIPAL, delegate=ATLAS_DELEGATE,
+            scope=[f"remediate:restart:{incident_id}"], ttl_seconds=120,
+        )
+    except AtlasError as e:
+        return {"success": False, "error": f"capability issuance failed: {e}"}
+
+    try:
+        result = atlas.verify(grant.record)
+    except AtlasError as e:
+        return {"success": False, "error": f"capability verification failed: {e}"}
+
+    if result.decision != Decision.ACCEPT:
+        try:
+            atlas.revoke(grant.instance)
+        except AtlasError:
+            pass
+        return {"success": False, "error": f"capability rejected: {result.decision}"}
+
+    restart_result = _restart_container(VICTIM_CONTAINER)
+
+    try:
+        atlas.revoke(grant.instance)
+    except AtlasError as e:
+        # Non-fatal: even if revoke never lands, the grant's 120s TTL plus Atlas's
+        # ~30s clock-skew grace on expiry bounds the exposure at ~150s worst case.
+        print(f"[incident {incident_id}] revoke failed (non-fatal, expires within ~150s worst case): {e}")
+
+    return restart_result
 
 
 def _check_health() -> bool:
@@ -70,7 +112,7 @@ def approve_and_remediate(incident_id: int) -> dict:
     db.commit()
     print(f"[incident {incident_id}] status -> executing")
 
-    restart_result = _restart_container(VICTIM_CONTAINER)
+    restart_result = _gated_restart(incident_id)
 
     if not restart_result["success"]:
         incident = db.query(Incident).filter(Incident.id == incident_id).first()

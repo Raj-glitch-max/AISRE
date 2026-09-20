@@ -26,3 +26,7 @@ class Incident(Base):
     evidence = Column(Text, nullable=True)
     recommended_action = Column(Text, nullable=True)
     risk = Column(String, nullable=True)
+
+    # Raw tool call/result transcript from the investigation, for faithfulness
+    # checking against the final RCA. JSON list of {tool, input, result}.
+    tool_transcript = Column(Text, nullable=True)

@@ -10,6 +10,7 @@ NEW_COLUMNS = {
     "evidence": "TEXT",
     "recommended_action": "TEXT",
     "risk": "VARCHAR",
+    "tool_transcript": "TEXT",
 }
 
 

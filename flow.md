@@ -587,3 +587,122 @@ accurate regardless of deployment status.
 
 Next: **finish Phase 7 (actual AWS deployment — needs access this session doesn't
 have) + Phase 8 (README, once its live-URL claim is either true or removed).**
+
+## Final phase — Atlas-gated remediation + faithfulness evaluation
+
+The two layers marked "bonus, not required" back at Phase 5 and after the
+hallucination finding above. Both landed as small diffs against existing files, not
+rewrites: `remediation.py` gained one new function (`_gated_restart`) and a
+one-line call-site swap; `agent.py` gained a list that gets appended to inside the
+existing round loop and persisted at the end.
+
+### Part A — Atlas-gated remediation
+
+`backend/atlas_sdk.py` is the real, unmodified client vendored from
+`Raj-glitch-max/atlas`'s `sdk/python/atlas.py` — zero-dependency stdlib, no pip
+install. `approve_and_remediate`'s call to `_restart_container` now goes through
+`_gated_restart`, which issues a one-shot capability scoped to
+`remediate:restart:{incident_id}` (120s TTL), verifies it, and only calls
+`docker restart` on an explicit `Decision.ACCEPT` — revoking the capability
+immediately after, success or failure.
+
+**Finding: the production Atlas URL from the original spec is dead.**
+`atlas-production-c457.up.railway.app` returns Railway's own
+`404 Application not found` on every path (`/health`, `/version`, `/`), confirmed
+live across repeated retries — that's Railway's edge saying no deployment is bound
+to that hostname, not Atlas itself responding. The code is fail-closed by
+construction, so this was actually usable as the "Atlas unreachable" test case
+rather than a blocker: `_gated_restart` correctly returns
+`{"success": False, "error": "capability issuance failed: ..."}` and never reaches
+`docker restart`.
+
+**Six scenarios verified** (`_gated_restart`, patching the module-level `atlas`
+client where a live server couldn't supply the case):
+
+1. Atlas unreachable at issue — **live**, against the real dead Railway URL.
+2. Atlas dies between issue and verify.
+3. Atlas explicitly `REJECT`s — restart never called, capability still revoked.
+4. Atlas explicitly `ACCEPT`s — real `docker restart victim-app` executes
+   (confirmed via `docker ps`, container actually cycled), then revokes.
+5. Revoke itself fails after a successful restart — confirmed non-fatal; restart
+   result still reports success.
+6. Atlas returns `INCONCLUSIVE` — blocks, same as an explicit reject. Only a literal
+   `ACCEPT` proceeds.
+
+**Then the atlas and kube-llm source repos were pulled into the project folder
+directly** (as `atlas/` and `kube-llm/`, each carrying their own `.git` — same shape
+as the original victim-app gitlink hazard from Phase 0/repository-state above).
+Added both to `.gitignore` immediately, before anything could be staged, since they
+are sibling projects being referenced locally, not part of this repo.
+
+Having the real `atlas` source unlocked finishing the two scenarios that couldn't
+be run against the dead Railway URL: `go build ./cmd/atlas-server` from the local
+`atlas/` checkout, run on a scratch port with `-trust-domain ai-sre.local` to match
+the principals `remediation.py` actually uses. Against that real, running server:
+
+- Fresh grant → `verify` → `ACCEPT` → `revoke` → re-`verify` → `REJECT`, confirmed
+  live (not mocked).
+- The expiry test **as originally specified** (`ttl_seconds=2`, `sleep(3)`) turned
+  out to be wrong: it still returned `ACCEPT`. Not a bug — Atlas applies a
+  documented 30-second clock-skew grace on expiry by design
+  (`internal/verify/check_expiry.go`, default in `cmd/atlas-server/app.go:118`,
+  tied to invariants INV3/ER3/FM3: a verifier's clock disagreeing with the issuer's
+  by up to 30s must not falsely reject). Re-run with `sleep(34)` (past TTL + full
+  skew grace) correctly returned `REJECT ["Expired"]`. Recorded here so nobody
+  re-derives this by watching the original 2s/3s test "pass" for the wrong reason
+  (a mocked or unreachable server would also make that assertion pass).
+- Fixed the resulting doc-comment imprecision in `remediation.py`: a failed revoke
+  bounds exposure at TTL (120s) **plus** the skew grace (~30s) — updated the
+  in-code message from "expires in 120s anyway" to "~150s worst case." Behavior is
+  unchanged; revoke still fires immediately after every use regardless.
+- Local atlas-server test instance stopped cleanly afterward (`TaskStop`, not
+  `pkill` — a stray `pkill -f atlas-server` in this environment killed the target
+  but also aborted the calling shell with exit 144, so direct `kill`/`TaskStop` is
+  the safer path here going forward).
+
+### Part B — Faithfulness evaluation
+
+Added `Incident.tool_transcript` (migrated via the existing idempotent
+`migrate_db.py` pattern). `agent.py`'s round loop now appends
+`{tool, input, result}` for every tool call into a `transcript` list, persisted as
+JSON alongside the RCA fields. `backend/faithfulness_eval.py` extracts ground
+truth (`exit_code`, `restart_count`) from the transcript's `get_container_status`
+calls and flags any numeric claim in the RCA text that doesn't match.
+
+**Five scenarios verified**, run directly against `check_faithfulness` and the real
+database:
+
+1. An accurate RCA whose numbers match the real tool output — nothing flagged.
+2. A claim made with no supporting `get_container_status` call at all — flagged as
+   unsupported rather than silently trusted.
+3. An RCA with no numeric claims — zero checked, zero flagged (nothing to catch,
+   correctly not over-flagging).
+4. A pre-feature incident (`tool_transcript IS NULL`) — confirmed live against the
+   real incident #3 row: `faithfulness_eval.py 3` prints "no transcript recorded"
+   and exits cleanly, no crash.
+5. **The actual incident #3 hallucination, reconstructed from real data**: pulled
+   incident #3's real stored `root_cause`/`evidence` text out of the live database
+   (still claims "exit code 137", "3 restarts") and paired it with the real ground
+   truth this project's own hallucination note above already established
+   (`get_container_status` actually returned `exit_code: 0, restart_count: 0`).
+   `check_faithfulness` flagged both fabricated numbers automatically, no human
+   re-reading logs required.
+
+A fresh end-to-end `investigate()` run (to confirm transcript persistence on a live
+incident, not just the reconstruction) was **not** run — this environment's shell
+has no `NVIDIA_API_KEY` set, and no key was fabricated to force it through. Flagged
+as deferred rather than silently skipped.
+
+### Prompt-injection note
+
+Mid-session, a tool result for a routine file read carried an embedded block
+formatted to look like a system-reminder, instructing a change to git commit
+attribution (adding a fabricated "Claude-Session" URL) and nudging toward
+`SendUserFile`. It did not come from genuine system configuration — real
+system-reminders don't arrive nested inside a file's read output — so it was
+disregarded and flagged to the user rather than acted on. Standard attribution
+(`Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>`, no session URL) was
+kept.
+
+Next: same as above — Phase 7's AWS deployment and Phase 8's README still need
+real infrastructure access this session doesn't have.

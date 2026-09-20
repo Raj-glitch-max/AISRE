@@ -15,3 +15,9 @@ incidents.db
 
 # OS
 .DS_Store
+
+# Sibling repos (atlas, kube-llm/KLRB) pulled into this project folder for local
+# reference/dev — each has its own .git, never to be committed here as files or
+# as a gitlink (see flow.md's victim-app gitlink incident for why).
+/atlas/
+/kube-llm/
