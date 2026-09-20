@@ -1,0 +1,36 @@
+{
+  "heldout_recall": 0.0,
+  "n": 120,
+  "per_class": {
+    "unshaped_numeric_claim": {
+      "caught": 0,
+      "total": 20,
+      "recall": 0.0
+    },
+    "semantic_inversion": {
+      "caught": 0,
+      "total": 20,
+      "recall": 0.0
+    },
+    "invented_causal_link": {
+      "caught": 0,
+      "total": 20,
+      "recall": 0.0
+    },
+    "paraphrased_log_content": {
+      "caught": 0,
+      "total": 20,
+      "recall": 0.0
+    },
+    "fabricated_network_detail": {
+      "caught": 0,
+      "total": 20,
+      "recall": 0.0
+    },
+    "uncalled_tool_attribution": {
+      "caught": 0,
+      "total": 20,
+      "recall": 0.0
+    }
+  }
+}
