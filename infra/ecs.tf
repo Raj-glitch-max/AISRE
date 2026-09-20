@@ -68,6 +68,10 @@ resource "aws_ecs_service" "victim" {
     security_groups = [aws_security_group.victim.id]
   }
 
+  service_registries {
+    registry_arn = aws_service_discovery_service.victim.arn
+  }
+
   # The remediation path issues force-new-deployment; without this, Terraform would
   # fight it on the next apply.
   lifecycle {
@@ -95,7 +99,12 @@ resource "aws_ecs_task_definition" "backend" {
 
     environment = [
       { name = "ATLAS_URL", value = var.atlas_url },
-      { name = "VICTIM_HEALTH_URL", value = "http://${aws_lb.main.dns_name}/victim/health" },
+      { name = "VICTIM_HEALTH_URL", value = "http://victim.${aws_service_discovery_private_dns_namespace.main.name}:8000/health" },
+      { name = "VICTIM_BASE_URL", value = "http://victim.${aws_service_discovery_private_dns_namespace.main.name}:8000" },
+      { name = "PLATFORM", value = "ecs" },
+      { name = "ECS_CLUSTER", value = aws_ecs_cluster.main.name },
+      { name = "ECS_SERVICE", value = aws_ecs_service.victim.name },
+      { name = "VICTIM_LOG_GROUP", value = aws_cloudwatch_log_group.victim.name },
       { name = "TRANSCRIPT_BUCKET", value = aws_s3_bucket.transcripts.id },
       { name = "REMEDIATION_STATE_MACHINE", value = aws_sfn_state_machine.remediation.arn },
       { name = "DB_HOST", value = aws_db_instance.main.address },

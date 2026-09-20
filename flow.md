@@ -706,3 +706,104 @@ kept.
 
 Next: same as above — Phase 7's AWS deployment and Phase 8's README still need
 real infrastructure access this session doesn't have.
+
+## Phase 8 — the fabrication confirmed, measured, and deployed
+
+### The incident #3 fabrication is real, reproducible, and worse than recorded
+
+The council's first instruction was to diagnose before defending: confirm incident #3 was
+genuine model fabrication and not a harness bug, given this project's own base rate for
+harness-induced findings (KLRB's leaked label) is 1 for 1.
+
+Two checks. **Static**: the prompt sent to the model is generic (`"Incident #{id} on
+service '{name}': health checks are failing."`) — no numbers, codes or counts enter it,
+so there is no leak path for "137" or "3" except invention. Tool results pass through
+`json.dumps` untransformed, and `messages` is rebuilt per investigation, so no
+cross-incident contamination. No innocent explanation found.
+
+**Live**: incident #3's own transcript is unrecoverable (it predates transcript
+persistence — that gap is *why* persistence was built), so a byte-for-byte replay is
+impossible. Instead a fresh incident was triggered end-to-end against the real model
+(`nvidia/nemotron-3-ultra-550b-a55b`, confirmed live in NVIDIA's catalogue and
+tool-calling verified first).
+
+**Incident #7 reproduced the exact same fabrication** — "exit code 137 with 3 restarts" —
+and in one respect is worse than #3. In #3 the model called `get_container_status`, got
+`exit_code: 0, restart_count: 0`, and contradicted it. In #7 it **never called
+`get_container_status` at all** and asserted both numbers anyway, while correctly
+attributing the real cause to `/admin/break` in the same output. A confident fabrication
+embedded inside an otherwise accurate RCA, with zero grounding attempt. The checker
+flagged both claims automatically, unprompted.
+
+This is now a reproducible model behaviour, months apart, not an anecdote.
+
+### The checker measured: 33.3% → 100% → 0%
+
+Full method and numbers in `eval/RESULTS.md`; predictions in `eval/PREREGISTRATION.md`,
+committed before the first run.
+
+1. **v0 frozen** at tag `faithfulness-checker-v0` before any measurement was designed.
+   Against 180 labeled fabrications across 9 classes and 100 truthful controls:
+   **33.3% recall, 0% FPR**. All four preregistered predictions held, including that the
+   same fabricated fact merely *reworded* ("exit status 137") is invisible.
+2. **v1 rewritten** from field-matching to evidence-grounding — flatten every tool result
+   into a corpus, require each extracted claim to be traceable to it. **100% recall, 0%
+   FPR.**
+3. **That 100% was then shown to be worthless.** The same author wrote the mutator and
+   the checker, so v1 was designed knowing the nine classes it would be scored on — the
+   same structural error as KLRB's leaked label. Six held-out classes written afterwards
+   catch **0 of 120**. Three of them contain no fabricated token at all: false assertions
+   built entirely from true values, which token-presence checking cannot reach.
+
+A third, smaller overfit surfaced inside the measurement itself: the 0% false-positive
+rate was an artifact of synthetic negatives being too clean (one quoted span per string).
+Against incident #7's real RCA, v1 raised five false positives by pairing one quoted
+span's closing quote with the next one's opening quote. Fixed by backreferencing the
+quote character; negatives reshaped to look like real model output. **One real incident
+was a better adversary than the generator.**
+
+The safety argument is untouched by any of this: remediation runs a fixed enumerated
+action gated by Atlas, so detection was never the control. That separation is what makes
+a 0% held-out recall a finding rather than a catastrophe.
+
+### AWS: deployed, and what the depth is actually in
+
+Council verdict was explicit — depth goes into **one hard edge**, not service count. No
+EKS, no multi-account, no mesh. `infra/` is ~59 Terraform resources:
+
+- **ECS Fargate** (backend + victim-app), ALB, two AZs, one NAT (the second buys
+  AZ-independent egress and a second $32/month; the tradeoff is written down, not
+  silently taken).
+- **RDS Postgres** replacing SQLite — SQLite in a deployed system is a red flag, and
+  Postgres makes the transcript/RCA tables queryable for the evaluation work.
+- **The interesting file is `iam.tf`.** The remediation action is authorized *twice*, by
+  two systems that must independently agree: Atlas mints a one-shot 120s capability at
+  the application layer; IAM grants the remediation identity `ecs:UpdateService` on
+  exactly one service ARN, under a **permission boundary that cannot be widened by a
+  later policy attach**, with a condition refusing any task-definition change so it
+  cannot deploy different code. The backend task role is *explicitly denied*
+  `ecs:UpdateService` — the agent that writes the RCA has no path to an action at all.
+- **Step Functions** models the approval gate with `waitForTaskToken`, so it survives a
+  backend restart mid-incident and fails closed on timeout — properties a status column
+  in application code does not have.
+
+### Deployment notes worth keeping
+
+- **The tool layer had to be rewritten, not lifted.** Every tool shelled out to the
+  Docker CLI, and Fargate has no Docker socket — a lift-and-shift would have failed every
+  investigation silently. `tools.py` now dispatches on `PLATFORM`, with an ECS backend
+  using the ECS and CloudWatch Logs APIs. The return *shape* is held identical across
+  both because `eval/` and the faithfulness checker read `exit_code`/`restart_count` out
+  of it; diverging there would break the evaluation without an error. The docker path was
+  regression-tested after the refactor and the full eval re-reproduced.
+- **ECS has no RestartCount.** It replaces tasks rather than restarting in place, so
+  `restart_count` is derived from the stopped-task count and `exit_code` from the most
+  recently stopped task — `None` when nothing has stopped, which the checker correctly
+  reads as "no evidence for an exit-code claim."
+- **Root credentials were present and valid.** `rootkey.csv` sat untracked in the project
+  root holding live AWS **root** account keys, and was one `git add -A` away from a public
+  repo. Gitignored, and used exactly once to create a scoped `ai-sre-deployer` IAM user;
+  everything since runs as that user. **The root key should be deleted in the console.**
+- **Docker builds needed `--network=host`.** The build container could reach
+  `deb.debian.org` but not `pypi.org`; the host could reach both. Host networking during
+  build was the fix.

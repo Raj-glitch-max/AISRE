@@ -187,6 +187,19 @@ data "aws_iam_policy_document" "backend_task" {
     resources = ["${aws_cloudwatch_log_group.victim.arn}:*"]
   }
 
+  # Read-only ECS: the investigation tools need to see task state to report exit codes
+  # and restart counts. Observation only — the deny below is what keeps it observation.
+  statement {
+    sid    = "InvestigateOnly"
+    effect = "Allow"
+    actions = [
+      "ecs:ListTasks",
+      "ecs:DescribeTasks",
+      "ecs:DescribeServices",
+    ]
+    resources = ["*"]
+  }
+
   statement {
     sid       = "ExplicitlyNoRemediation"
     effect    = "Deny"

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import threading
 from datetime import datetime
 
@@ -9,7 +10,7 @@ from agent import investigate
 from database import SessionLocal
 from models import Incident
 
-TARGET_URL = "http://localhost:8000/health"
+TARGET_URL = os.getenv("VICTIM_HEALTH_URL", "http://localhost:8000/health")
 POLL_INTERVAL_SECONDS = 5
 RESOLVE_AFTER_SUCCESSES = 2
 

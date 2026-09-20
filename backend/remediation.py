@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 import time
@@ -10,13 +11,20 @@ from atlas_sdk import AtlasClient, Decision, AtlasError
 from database import SessionLocal
 from models import Incident
 
-VICTIM_CONTAINER = "victim-app"
-HEALTH_URL = "http://localhost:8000/health"
+PLATFORM = os.getenv("PLATFORM", "docker")
+
+VICTIM_CONTAINER = os.getenv("VICTIM_CONTAINER", "victim-app")
+HEALTH_URL = os.getenv("VICTIM_HEALTH_URL", "http://localhost:8000/health")
 VERIFY_WAIT_SECONDS = 8
 VERIFY_ATTEMPTS = 3
 VERIFY_RETRY_INTERVAL = 3
 
-atlas = AtlasClient("https://atlas-production-c457.up.railway.app")
+ECS_CLUSTER = os.getenv("ECS_CLUSTER", "")
+ECS_SERVICE = os.getenv("ECS_SERVICE", "")
+
+atlas = AtlasClient(
+    os.getenv("ATLAS_URL", "https://atlas-production-c457.up.railway.app")
+)
 
 ATLAS_PRINCIPAL = "spiffe://ai-sre.local/system/approval-gate"
 ATLAS_DELEGATE = "spiffe://ai-sre.local/agent/remediation-executor"
@@ -27,6 +35,19 @@ class IncidentNotPendingApproval(Exception):
 
 
 def _restart_container(container_name: str) -> dict:
+    """The fixed action, in both platforms.
+
+    Still exactly one action with no parameters derived from model output — the ECS path
+    forces a new deployment of one named service and cannot express anything else, the
+    same way `docker restart <fixed name>` cannot. That equivalence is what lets the
+    safety argument survive the move to Fargate unchanged.
+    """
+    if PLATFORM == "ecs":
+        return _ecs_restart()
+    return _docker_restart(container_name)
+
+
+def _docker_restart(container_name: str) -> dict:
     try:
         result = subprocess.run(
             ["docker", "restart", container_name],
@@ -41,6 +62,24 @@ def _restart_container(container_name: str) -> dict:
 
     if result.returncode != 0:
         return {"success": False, "error": result.stderr.strip()}
+
+    return {"success": True}
+
+
+def _ecs_restart() -> dict:
+    import boto3
+
+    if not (ECS_CLUSTER and ECS_SERVICE):
+        return {"success": False, "error": "ECS_CLUSTER/ECS_SERVICE not configured"}
+
+    try:
+        boto3.client("ecs").update_service(
+            cluster=ECS_CLUSTER,
+            service=ECS_SERVICE,
+            forceNewDeployment=True,
+        )
+    except Exception as exc:
+        return {"success": False, "error": f"ecs update_service failed: {exc}"}
 
     return {"success": True}
 

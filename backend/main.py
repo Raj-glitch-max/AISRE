@@ -14,6 +14,8 @@ from remediation import approve_and_remediate
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
+VICTIM_BASE_URL = os.getenv("VICTIM_BASE_URL", "http://localhost:8000")
+
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
@@ -77,7 +79,7 @@ def demo_trigger():
     # endpoint directly (nor should they be able to — victim-app stays internal).
     # This proxies the one safe action: break it, let the auto-trigger + agent
     # take it from there.
-    httpx.post("http://localhost:8000/admin/break", timeout=3)
+    httpx.post(f"{VICTIM_BASE_URL}/admin/break", timeout=5)
     return {"status": "triggered"}
 
 
