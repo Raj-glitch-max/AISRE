@@ -14,6 +14,27 @@ from tools import (
 )
 
 
+def _load_dotenv():
+    # No dotenv dependency added on purpose (matches atlas_sdk's zero-dep spirit) —
+    # this is a 10-line parser for a KEY=VALUE file. Real env vars still win via
+    # setdefault, so `export NVIDIA_API_KEY=...` in-shell overrides the .env.
+    env_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", ".env"
+    )
+    if not os.path.exists(env_path):
+        return
+    with open(env_path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip())
+
+
+_load_dotenv()
+
+
 MODEL = os.getenv(
     "NIM_MODEL",
     "nvidia/nemotron-3-ultra-550b-a55b",
@@ -41,9 +62,12 @@ def _get_client():
     # Phase 1's own health monitoring) before it can even start.
     global _client
     if _client is None:
+        api_key = os.environ.get("NVIDIA_API_KEY") or os.environ.get("NIM_KEY")
+        if not api_key:
+            raise KeyError("NVIDIA_API_KEY (or NIM_KEY) not set")
         _client = OpenAI(
             base_url="https://integrate.api.nvidia.com/v1",
-            api_key=os.environ["NVIDIA_API_KEY"],
+            api_key=api_key,
         )
     return _client
 

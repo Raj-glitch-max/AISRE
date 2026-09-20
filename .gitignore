@@ -16,6 +16,23 @@ incidents.db
 # OS
 .DS_Store
 
+# AWS credential exports. rootkey.csv is what the console hands you when you create
+# ROOT account keys — it must never be committed, and ideally should not exist at all.
+rootkey.csv
+*accessKeys*.csv
+credentials.csv
+
+# Terraform — state can contain secrets (DB password, NIM key), never commit it.
+# The lock file IS committed deliberately, so provider versions are reproducible.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tf.plan
+infra/build/
+*.auto.tfvars
+terraform.tfvars
+
 # Sibling repos (atlas, kube-llm/KLRB) pulled into this project folder for local
 # reference/dev — each has its own .git, never to be committed here as files or
 # as a gitlink (see flow.md's victim-app gitlink incident for why).
