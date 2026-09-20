@@ -57,12 +57,22 @@ def make_transcript(exit_code=0, restart_count=0, container="victim-app",
 
 def truthful_rca(transcript):
     """An RCA whose every numeric claim is rendered FROM the transcript, so it is a
-    known negative by construction."""
+    known negative by construction.
+
+    Deliberately shaped like real model output: several quoted fragments per string,
+    both quote characters, and apostrophes in prose. The first version of this used one
+    clean quote per string, which hid a quote-pairing false positive in the checker that
+    only appeared against a real incident.
+    """
     status = next((c["result"] for c in transcript
                    if c["tool"] == "get_container_status"), None)
     evidence = [
         "Logs show a health check failure: 'dependency unavailable'",
         "The /admin/break endpoint was invoked, matching the observed failure",
+        "The log line 'Health check OK' stops and 'dependency unavailable' begins, "
+        "so the service didn't fail on its own",
+        'Logs contain "Health check failed: dependency unavailable" immediately '
+        'after the break was triggered',
     ]
     if status:
         evidence.append(

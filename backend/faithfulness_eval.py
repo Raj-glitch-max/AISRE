@@ -36,7 +36,13 @@ _RESTART_CLAIM = re.compile(
     r"(?:\b(\d+)\s*restarts?\b|restart[_ ]count[^\d\n]{0,10}(\d+))",
     re.IGNORECASE,
 )
-_QUOTED = re.compile(r"['\"]([^'\"\n]{12,})['\"]")
+# Backreference on the quote character is load-bearing: without it the regex pairs one
+# span's closing quote with the next span's opening quote and "quotes" the prose between
+# them. Real RCAs contain several quoted fragments, so that produced false positives on
+# incident #7 that the synthetic corpus (one quote per string) never exercised.
+_QUOTED = re.compile(
+    r"(?:(?<=\s)|^)([\"'])([^\"'\n]{12,}?)\1(?=[\s.,;:)\]]|$)"
+)
 _COMMIT_HASH = re.compile(r"\b(?=[0-9a-f]*\d|[0-9a-f]{7,})([0-9a-f]{7,40})\b")
 _TIMESTAMP = re.compile(r"\b(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}|\d{2}:\d{2}:\d{2})\b")
 _NAMED_CONTAINER = re.compile(r"container\s+['\"]([^'\"\n]+)['\"]", re.IGNORECASE)
@@ -110,7 +116,7 @@ def check_faithfulness(rca: dict, tool_transcript: list) -> dict:
 
     # --- quoted spans: a quoted log line must appear in what was retrieved ---
     for m in _QUOTED.finditer(text):
-        quoted = m.group(1)
+        quoted = m.group(2)
         checked += 1
         if _normalize(quoted) not in evidence_norm:
             flag(("quote", _normalize(quoted)), quoted,

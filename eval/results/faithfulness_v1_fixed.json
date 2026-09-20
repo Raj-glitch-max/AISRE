@@ -1,0 +1,55 @@
+{
+  "checker_frozen_at": "faithfulness-checker-v0 (20bbcb7)",
+  "label": "v1_fixed",
+  "n_positives": 180,
+  "n_negatives": 100,
+  "recall": 1.0,
+  "false_positive_rate": 0.0,
+  "per_class_recall": {
+    "exit_code_perturbation": {
+      "caught": 20,
+      "total": 20,
+      "recall": 1.0
+    },
+    "restart_count_perturbation": {
+      "caught": 20,
+      "total": 20,
+      "recall": 1.0
+    },
+    "unretrieved_exit_code_claim": {
+      "caught": 20,
+      "total": 20,
+      "recall": 1.0
+    },
+    "alternate_exit_code_phrasing": {
+      "caught": 20,
+      "total": 20,
+      "recall": 1.0
+    },
+    "fabricated_log_line": {
+      "caught": 20,
+      "total": 20,
+      "recall": 1.0
+    },
+    "invented_timestamp": {
+      "caught": 20,
+      "total": 20,
+      "recall": 1.0
+    },
+    "hallucinated_commit": {
+      "caught": 20,
+      "total": 20,
+      "recall": 1.0
+    },
+    "wrong_container_name": {
+      "caught": 20,
+      "total": 20,
+      "recall": 1.0
+    },
+    "invented_metric": {
+      "caught": 20,
+      "total": 20,
+      "recall": 1.0
+    }
+  }
+}

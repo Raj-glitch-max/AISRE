@@ -73,6 +73,26 @@ Three of these six carry no fabricated token whatsoever. They are false *asserti
 composed entirely of true *values*. No amount of token-presence checking reaches them —
 this is a structural ceiling of the approach, not a gap to be patched with more regexes.
 
+## A third overfit, found in the measurement itself
+
+The 0% false-positive rate was *also* initially an artifact. The synthetic truthful RCAs
+used one clean quoted span per string. Real model output does not: incident #7's RCA
+contains several quoted fragments per sentence, in both quote characters.
+
+Run against that real incident, v1 raised **five false positives** — its quoted-span
+regex paired one span's closing quote with the next span's opening quote and "quoted" the
+prose between them. The synthetic negatives could never surface this, because they never
+contained two quotes in one string.
+
+Fixed by backreferencing the quote character, and the negatives were reshaped to look
+like real output (multiple quoted fragments, both quote characters, apostrophes in
+prose). Post-fix: 100% recall / 0% FPR on the designed corpus, 0% held-out — unchanged,
+confirming the held-out gap is structural rather than a symptom of this bug.
+
+The lesson generalizes past this project: **a self-authored negative corpus tends to be
+too clean, and a 0% false-positive rate measured on it means less than it appears.** The
+real incident was a better adversary than the generator was.
+
 ## What this licenses the project to claim
 
 Supportable:
