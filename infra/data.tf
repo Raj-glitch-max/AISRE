@@ -6,9 +6,12 @@
 resource "aws_s3_bucket" "transcripts" {
   bucket = "${local.name}-transcripts-${data.aws_caller_identity.current.account_id}"
 
-  lifecycle {
-    prevent_destroy = true
-  }
+  # force_destroy allows `terraform destroy` to remove the bucket with objects still in
+  # it. This previously carried prevent_destroy to protect the evaluation corpus; that
+  # blocked teardown of a stack being run on a personal account, and the corpus that
+  # actually matters lives in eval/results/ and backend/incidents.db, both in git.
+  # Re-add prevent_destroy if this ever holds the only copy of anything.
+  force_destroy = true
 }
 
 resource "aws_s3_bucket_public_access_block" "transcripts" {

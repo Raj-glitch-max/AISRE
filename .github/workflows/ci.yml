@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  reproduce:
+    name: Re-derive every published claim
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # scripts/reproduce.py extracts the v0 checker from the frozen tag, so the
+          # tags and enough history to resolve them must be present.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Verify every module imports
+        run: make check
+
+      - name: Reproduce README claims
+        # Fails the build if any published number has drifted. That is the point:
+        # a claim that stops being true should break CI, not rot quietly in a README.
+        run: make reproduce
+
+      - name: Measure held-out recall
+        run: make heldout
+
+  secrets:
+    name: No credentials in the diff
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scan for credential patterns
+        run: |
+          set -e
+          PATTERN='AKIA[0-9A-Z]{16}|nvapi-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|aws_secret_access_key[[:space:]]*='
+          if git grep -nIE "$PATTERN" -- . ':!.github/workflows/ci.yml'; then
+            echo "::error::Credential-shaped string found in tracked files"
+            exit 1
+          fi
+          echo "no credential patterns in tracked files"
+
+      - name: Ensure secret files are not tracked
+        run: |
+          set -e
+          for f in .env rootkey.csv infra/terraform.tfstate; do
+            if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+              echo "::error::$f is tracked and must not be"
+              exit 1
+            fi
+          done
+          echo "no secret files tracked"
+
+  terraform:
+    name: Terraform validates
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Format check
+        run: terraform -chdir=infra fmt -check -recursive
+
+      - name: Validate
+        # -backend=false: validation needs no credentials and provisions nothing.
+        run: |
+          terraform -chdir=infra init -backend=false -input=false
+          terraform -chdir=infra validate
