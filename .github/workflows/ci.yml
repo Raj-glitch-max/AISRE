@@ -6,6 +6,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  # Pin Atlas version for reproducible builds
+  ATLAS_REF: "v0.1.0"
+
 jobs:
   reproduce:
     name: Re-derive every published claim
@@ -35,6 +39,23 @@ jobs:
 
       - name: Measure held-out recall
         run: make heldout
+
+  atlas:
+    name: Build Atlas from pinned ref
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build atlas-server from ATLAS_REF
+        run: |
+          git clone --branch ${{ env.ATLAS_REF }} --depth 1 https://github.com/Raj-glitch-max/atlas.git atlas-src
+          cd atlas-src
+          make build
+          # Verify binary works
+          ./bin/atlas-server --version
 
   secrets:
     name: No credentials in the diff

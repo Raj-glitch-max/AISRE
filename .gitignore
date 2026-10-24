@@ -38,3 +38,13 @@ terraform.tfvars
 # as a gitlink (see flow.md's victim-app gitlink incident for why).
 /atlas/
 /kube-llm/
+
+.dossier/*
+resume.pdf
+.claude/settings.local.json
+RESUME_CLAIMS.json
+.gitignore
+JOURNAL_RESUME_CLAIMS_ANALYSIS.md
+COUNCIL_REVIEW.md
+CLAIM_ANALYSIS.md
+PROJECT_REALITY.md

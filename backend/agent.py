@@ -2,9 +2,11 @@ import json
 import os
 import re
 import sys
+from typing import Any
 
 from openai import OpenAI
 
+from atlas_sdk import AtlasClient, Decision, AtlasError
 from database import SessionLocal
 from models import Incident
 from tools import (
@@ -70,6 +72,64 @@ def _get_client():
             api_key=api_key,
         )
     return _client
+
+
+# Atlas capability checking for investigation tools
+_atlas_client = None
+
+
+def _get_atlas_client():
+    """Get or create the Atlas client for capability checking."""
+    global _atlas_client
+    if _atlas_client is None:
+        atlas_url = os.environ.get("ATLAS_URL")
+        if not atlas_url:
+            raise RuntimeError("ATLAS_URL not set")
+        atlas_api_key = os.environ.get("ATLAS_API_KEY")
+        _atlas_client = AtlasClient(atlas_url, api_key=atlas_api_key)
+    return _atlas_client
+
+
+def _check_investigation_capability(tool_name: str) -> dict:
+    """Check Atlas capability for an investigation tool.
+
+    Returns dict with 'allowed' (bool) and optionally 'error' (str).
+    """
+    # Map tool names to capability scopes
+    scope_map = {
+        "get_container_status": "investigate:container_status",
+        "get_recent_logs": "investigate:logs",
+        "get_recent_commits": "investigate:commits",
+    }
+
+    scope = scope_map.get(tool_name)
+    if not scope:
+        return {"allowed": True}  # Unknown tool, allow (will fail later)
+
+    # Get principals from environment
+    principal = os.environ.get("ATLAS_PRINCIPAL")
+    delegate = os.environ.get("ATLAS_DELEGATE")
+    if not principal or not delegate:
+        return {"allowed": False, "error": "ATLAS_PRINCIPAL/ATLAS_DELEGATE not configured"}
+
+    try:
+        atlas = _get_atlas_client()
+        grant = atlas.issue(
+            principal=principal, delegate=delegate,
+            scope=[scope], ttl_seconds=60,
+        )
+        result = atlas.verify(grant.record)
+        try:
+            atlas.revoke(grant.instance)
+        except AtlasError:
+            pass
+
+        if result.decision == Decision.ACCEPT:
+            return {"allowed": True}
+        else:
+            return {"allowed": False, "error": f"capability rejected: {result.decision}"}
+    except AtlasError as e:
+        return {"allowed": False, "error": f"capability check failed: {e}"}
 
 
 SYSTEM_PROMPT = """
@@ -190,7 +250,64 @@ TOOL_FUNCTIONS = {
 }
 
 
+# Build a mapping of tool name -> schema for validation
+TOOL_SCHEMAS = {
+    tool["function"]["name"]: tool["function"]["parameters"]
+    for tool in TOOLS
+}
+
+
+def _validate_tool_input(name: str, tool_input: dict) -> tuple[bool, str | None]:
+    """Validate tool input against the tool's JSON schema.
+
+    Returns (is_valid, error_message).
+    """
+    schema = TOOL_SCHEMAS.get(name)
+    if not schema:
+        return False, f"unknown tool '{name}'"
+
+    # Check required fields
+    required = schema.get("required", [])
+    for field in required:
+        if field not in tool_input:
+            return False, f"missing required field: {field}"
+
+    # Check properties
+    properties = schema.get("properties", {})
+    for field, value in tool_input.items():
+        if field not in properties:
+            return False, f"unexpected field: {field}"
+
+        prop_schema = properties[field]
+        expected_type = prop_schema.get("type")
+
+        if expected_type == "integer":
+            if not isinstance(value, int):
+                return False, f"field '{field}' must be an integer"
+            # Check min/max if specified
+            if "minimum" in prop_schema and value < prop_schema["minimum"]:
+                return False, f"field '{field}' must be >= {prop_schema['minimum']}"
+            if "maximum" in prop_schema and value > prop_schema["maximum"]:
+                return False, f"field '{field}' must be <= {prop_schema['maximum']}"
+        elif expected_type == "string":
+            if not isinstance(value, str):
+                return False, f"field '{field}' must be a string"
+        elif expected_type == "number":
+            if not isinstance(value, (int, float)):
+                return False, f"field '{field}' must be a number"
+        elif expected_type == "boolean":
+            if not isinstance(value, bool):
+                return False, f"field '{field}' must be a boolean"
+
+    return True, None
+
+
 def _execute_tool(name: str, tool_input: dict):
+    # Validate tool input against schema before execution
+    is_valid, error = _validate_tool_input(name, tool_input)
+    if not is_valid:
+        return {"error": f"validation failed: {error}"}
+
     if name not in TOOL_FUNCTIONS:
         return {
             "error": f"unknown tool '{name}'"
@@ -361,10 +478,15 @@ def investigate(incident_id: int) -> dict:
                     f"calling {tool_name}({tool_input})"
                 )
 
-                result = _execute_tool(
-                    tool_name,
-                    tool_input,
-                )
+                # Check Atlas capability for investigation tools
+                capability_result = _check_investigation_capability(tool_name)
+                if not capability_result["allowed"]:
+                    result = {"error": f"capability denied: {capability_result['error']}"}
+                else:
+                    result = _execute_tool(
+                        tool_name,
+                        tool_input,
+                    )
 
                 executed_tool_count += 1
                 transcript.append(

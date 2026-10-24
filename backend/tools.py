@@ -13,13 +13,63 @@ the docker backend would fail every call there rather than degrade.
 """
 import json
 import os
+import re
 import subprocess
+from pathlib import Path
 
 PLATFORM = os.getenv("PLATFORM", "docker")
 
 ECS_CLUSTER = os.getenv("ECS_CLUSTER", "")
 ECS_SERVICE = os.getenv("ECS_SERVICE", "")
 VICTIM_LOG_GROUP = os.getenv("VICTIM_LOG_GROUP", "")
+VICTIM_CONTAINER = os.getenv("VICTIM_CONTAINER", "victim-app")
+
+
+# --- Validation helpers ---
+
+MAX_LINES = 5000
+MAX_COUNT = 100
+
+CONTAINER_NAME_PATTERN = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$')
+GIT_REPO_NAME_PATTERN = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$')
+
+
+def _validate_container_name(container_name: str) -> str:
+    """Validate container name against expected target."""
+    if not CONTAINER_NAME_PATTERN.match(container_name):
+        raise ValueError(f"Invalid container name: {container_name}")
+    if container_name != VICTIM_CONTAINER:
+        raise ValueError(f"Container name '{container_name}' does not match target '{VICTIM_CONTAINER}'")
+    return container_name
+
+
+def _validate_lines(lines: int) -> int:
+    """Validate lines parameter."""
+    if not isinstance(lines, int):
+        raise TypeError(f"lines must be an integer, got {type(lines).__name__}")
+    if lines <= 0 or lines > MAX_LINES:
+        raise ValueError(f"lines must be a positive integer <= {MAX_LINES}, got {lines}")
+    return lines
+
+
+def _validate_count(count: int) -> int:
+    """Validate count parameter."""
+    if not isinstance(count, int):
+        raise TypeError(f"count must be an integer, got {type(count).__name__}")
+    if count <= 0 or count > MAX_COUNT:
+        raise ValueError(f"count must be a positive integer <= {MAX_COUNT}, got {count}")
+    return count
+
+
+def _validate_repo_path(repo_path: str) -> str:
+    """Validate repo path to prevent path traversal."""
+    path = Path(repo_path).resolve()
+    # Ensure path is within allowed directories (project root or victim-app)
+    project_root = Path(__file__).parent.parent.resolve()
+    victim_app = project_root / "victim-app"
+    if not (str(path).startswith(str(project_root)) and path != project_root):
+        raise ValueError(f"Repo path '{repo_path}' is not within allowed directory")
+    return str(path)
 
 
 def _boto3():
@@ -163,12 +213,15 @@ def _ecs_recent_logs(container_name: str, lines: int = 50) -> str:
 
 
 def get_container_status(container_name: str) -> dict:
+    _validate_container_name(container_name)
     if PLATFORM == "ecs":
         return _ecs_container_status(container_name)
     return _docker_container_status(container_name)
 
 
 def get_recent_logs(container_name: str, lines: int = 50) -> str:
+    _validate_container_name(container_name)
+    _validate_lines(lines)
     if PLATFORM == "ecs":
         return _ecs_recent_logs(container_name, lines)
     return _docker_recent_logs(container_name, lines)
@@ -176,6 +229,8 @@ def get_recent_logs(container_name: str, lines: int = 50) -> str:
 
 def get_recent_commits(repo_path: str, count: int = 5) -> list:
     """Platform-independent: the repo travels with the image."""
+    _validate_repo_path(repo_path)
+    _validate_count(count)
     try:
         result = subprocess.run(
             ["git", "log", f"-{count}", "--pretty=format:%h|%an|%ad|%s", "--date=iso"],

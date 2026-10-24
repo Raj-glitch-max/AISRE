@@ -18,6 +18,64 @@ resource "aws_sns_topic_subscription" "approvals_email" {
   endpoint  = var.alert_email
 }
 
+# Health check Lambda - verifies service health after restart
+data "archive_file" "health_check" {
+  type        = "zip"
+  output_path = "${path.module}/build/health_check.zip"
+
+  source {
+    filename = "health_check.py"
+    content  = <<-PY
+      import os
+      import json
+      import urllib.request
+      import urllib.error
+
+      HEALTH_URL = os.environ.get("HEALTH_URL", "http://localhost:8000/health")
+      MAX_ATTEMPTS = int(os.environ.get("MAX_ATTEMPTS", "3"))
+      RETRY_INTERVAL = int(os.environ.get("RETRY_INTERVAL", "10"))
+
+      def handler(event, context):
+          """Check victim service health with retries."""
+          for attempt in range(1, MAX_ATTEMPTS + 1):
+              try:
+                  req = urllib.request.Request(HEALTH_URL, method="GET")
+                  with urllib.request.urlopen(req, timeout=5) as resp:
+                      if resp.status == 200:
+                          return {"healthy": True, "attempt": attempt}
+              except urllib.error.URLError:
+                  pass
+              except urllib.error.HTTPError:
+                  pass
+
+              if attempt < MAX_ATTEMPTS:
+                  import time
+                  time.sleep(RETRY_INTERVAL)
+
+          return {"healthy": False, "attempts": MAX_ATTEMPTS}
+    PY
+  }
+}
+
+resource "aws_lambda_function" "health_check" {
+  function_name    = "${local.name}-health-check"
+  role             = aws_iam_role.health_check.arn
+  handler          = "health_check.handler"
+  runtime          = "python3.12"
+  filename         = data.archive_file.health_check.output_path
+  source_code_hash = data.archive_file.health_check.output_base64sha256
+  timeout          = 60
+
+  environment {
+    variables = {
+      HEALTH_URL      = "http://${aws_lb.victim.dns_name}/health"
+      MAX_ATTEMPTS    = "3"
+      RETRY_INTERVAL  = "10"
+    }
+  }
+}
+
+# Remediation Lambda - with Atlas capability verification
 data "archive_file" "remediate" {
   type        = "zip"
   output_path = "${path.module}/build/remediate.zip"
@@ -26,23 +84,70 @@ data "archive_file" "remediate" {
     filename = "index.py"
     content  = <<-PY
       import os
+      import json
+      import urllib.request
+      import urllib.error
       import boto3
-
-      ecs = boto3.client("ecs")
 
       CLUSTER = os.environ["CLUSTER"]
       SERVICE = os.environ["SERVICE"]
+      ATLAS_URL = os.environ["ATLAS_URL"]
+      ATLAS_API_KEY = os.environ.get("ATLAS_API_KEY")
+      ATLAS_PRINCIPAL = os.environ["ATLAS_PRINCIPAL"]
+      ATLAS_DELEGATE = os.environ["ATLAS_DELEGATE"]
+      VICTIM_CONTAINER = os.environ.get("VICTIM_CONTAINER", "victim-app")
 
+      ecs = boto3.client("ecs")
+
+      def _call_atlas(method, path, body=None):
+          """Call Atlas server."""
+          data = json.dumps(body).encode() if body is not None else None
+          req = urllib.request.Request(ATLAS_URL + path, data=data, method=method)
+          req.add_header("Content-Type", "application/json")
+          if ATLAS_API_KEY:
+              req.add_header("Authorization", "Bearer " + ATLAS_API_KEY)
+          try:
+              with urllib.request.urlopen(req, timeout=8) as resp:
+                  return json.loads(resp.read())
+          except urllib.error.HTTPError as e:
+              raw = e.read()
+              try:
+                  msg = json.loads(raw).get("error", raw.decode())
+              except Exception:
+                  msg = raw.decode(errors="replace")
+              raise RuntimeError(f"{e.code}: {msg}")
+          except urllib.error.URLError as e:
+              raise RuntimeError(f"atlas-server unreachable ({e.reason})")
 
       def handler(event, context):
-          """Force a new deployment. This is the entire action space of this identity —
-          IAM permits UpdateService on one service ARN and denies a task-definition
-          change, so this function cannot deploy different code even if asked to."""
+          """Force a new deployment after verifying Atlas capability."""
+          # Step 1: Issue capability
+          grant = _call_atlas("POST", "/issue", {
+              "principal": ATLAS_PRINCIPAL,
+              "delegate": ATLAS_DELEGATE,
+              "scope": [f"remediate:restart:{VICTIM_CONTAINER}"],
+              "ttlSeconds": 120,
+          })
+
+          # Step 2: Verify capability
+          result = _call_atlas("POST", "/verify", {"record": grant["record"]})
+          if result.get("decision") != "accept":
+              _call_atlas("POST", "/revoke", {"instance": grant["instance"]})
+              raise RuntimeError(f"capability rejected: {result.get('decision')}")
+
+          # Step 3: Execute restart
           ecs.update_service(
               cluster=CLUSTER,
               service=SERVICE,
               forceNewDeployment=True,
           )
+
+          # Step 4: Revoke capability
+          try:
+              _call_atlas("POST", "/revoke", {"instance": grant["instance"]})
+          except Exception:
+              pass  # Non-fatal, expires in ~150s
+
           return {"restarted": SERVICE, "incident_id": event.get("incident_id")}
     PY
   }
@@ -55,12 +160,17 @@ resource "aws_lambda_function" "remediate" {
   runtime          = "python3.12"
   filename         = data.archive_file.remediate.output_path
   source_code_hash = data.archive_file.remediate.output_base64sha256
-  timeout          = 30
+  timeout          = 60
 
   environment {
     variables = {
-      CLUSTER = aws_ecs_cluster.main.name
-      SERVICE = aws_ecs_service.victim.name
+      CLUSTER           = aws_ecs_cluster.main.name
+      SERVICE           = aws_ecs_service.victim.name
+      ATLAS_URL         = var.atlas_url
+      ATLAS_API_KEY     = var.atlas_api_key
+      ATLAS_PRINCIPAL   = var.atlas_principal
+      ATLAS_DELEGATE    = var.atlas_delegate
+      VICTIM_CONTAINER  = "victim-app"
     }
   }
 }
@@ -98,7 +208,7 @@ resource "aws_sfn_state_machine" "remediation" {
       Remediate = {
         Type     = "Task"
         Resource = aws_lambda_function.remediate.arn
-        Next     = "Verify"
+        Next     = "VerifyHealth"
         Retry = [{
           ErrorEquals     = ["States.TaskFailed"]
           IntervalSeconds = 5
@@ -111,16 +221,36 @@ resource "aws_sfn_state_machine" "remediation" {
         }]
       }
 
-      # The restart is asynchronous; give the service time to come back before judging.
-      Verify = {
-        Type    = "Wait"
-        Seconds = 30
-        Next    = "Done"
+      # Verify health with actual health checks, not just wait
+      VerifyHealth = {
+        Type     = "Task"
+        Resource = aws_lambda_function.health_check.arn
+        Next     = "CheckHealthResult"
+        Retry = [{
+          ErrorEquals     = ["States.TaskFailed"]
+          IntervalSeconds = 10
+          MaxAttempts     = 2
+          BackoffRate     = 2.0
+        }]
+        Catch = [{
+          ErrorEquals = ["States.ALL"]
+          Next        = "RemediationFailed"
+        }]
+      }
+
+      CheckHealthResult = {
+        Type = "Choice"
+        Choices = [{
+          Variable = "$.healthy"
+          BooleanEquals = true
+          Next = "Done"
+        }]
+        Default = "RemediationFailed"
       }
 
       Done              = { Type = "Succeed" }
       ApprovalExpired   = { Type = "Fail", Error = "ApprovalExpired", Cause = "No human approval within the timeout; fail closed." }
-      RemediationFailed = { Type = "Fail", Error = "RemediationFailed", Cause = "The fixed action did not complete." }
+      RemediationFailed = { Type = "Fail", Error = "RemediationFailed", Cause = "The fixed action did not complete or service remains unhealthy." }
     }
   })
 }

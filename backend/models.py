@@ -30,3 +30,10 @@ class Incident(Base):
     # Raw tool call/result transcript from the investigation, for faithfulness
     # checking against the final RCA. JSON list of {tool, input, result}.
     tool_transcript = Column(Text, nullable=True)
+
+    # Approval tracking
+    approved_by = Column(String, nullable=True)
+    approved_at = Column(DateTime, nullable=True)
+
+    # Step Functions execution ARN for AWS deployment
+    sfn_execution_arn = Column(String, nullable=True)

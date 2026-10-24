@@ -27,7 +27,29 @@ variable "nim_api_key" {
 variable "atlas_url" {
   description = "Base URL of the Atlas capability server that gates remediation."
   type        = string
-  default     = "https://atlas-production-c457.up.railway.app"
+  # No default - must be explicitly provided
+}
+
+variable "atlas_api_key" {
+  description = "API key for Atlas server authentication. Supply via TF_VAR_atlas_api_key; never commit."
+  type        = string
+  sensitive   = true
+}
+
+variable "atlas_principal" {
+  description = "SPIFFE principal for Atlas capability issuance."
+  type        = string
+}
+
+variable "atlas_delegate" {
+  description = "SPIFFE delegate for Atlas capability issuance."
+  type        = string
+}
+
+variable "s3_transcript_bucket" {
+  description = "S3 bucket for storing incident transcripts."
+  type        = string
+  default     = ""
 }
 
 variable "db_instance_class" {

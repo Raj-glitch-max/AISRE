@@ -216,6 +216,43 @@ resource "aws_iam_role_policy" "backend_task" {
 
 # --- Step Functions role ---
 
+# Health check Lambda role
+data "aws_iam_policy_document" "health_check_assume" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["lambda.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "health_check" {
+  name               = "${local.name}-health-check"
+  assume_role_policy = data.aws_iam_policy_document.health_check_assume.json
+}
+
+data "aws_iam_policy_document" "health_check" {
+  statement {
+    effect    = "Allow"
+    actions   = ["logs:CreateLogStream", "logs:PutLogEvents", "cloudwatch:PutMetricData"]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "health_check" {
+  name   = "${local.name}-health-check"
+  role   = aws_iam_role.health_check.id
+  policy = data.aws_iam_policy_document.health_check.json
+}
+
+resource "aws_iam_role_policy_attachment" "health_check_logs" {
+  role       = aws_iam_role.health_check.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+# --- Step Functions role ---
+
 data "aws_iam_policy_document" "sfn_assume" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -235,7 +272,10 @@ data "aws_iam_policy_document" "stepfunctions" {
   statement {
     effect    = "Allow"
     actions   = ["lambda:InvokeFunction"]
-    resources = [aws_lambda_function.remediate.arn]
+    resources = [
+      aws_lambda_function.remediate.arn,
+      aws_lambda_function.health_check.arn
+    ]
   }
 
   statement {
