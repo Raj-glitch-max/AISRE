@@ -199,7 +199,20 @@ def _restart_container(container_name: str) -> dict:
     """
     if PLATFORM == "ecs":
         return _ecs_restart()
-    return _docker_restart(container_name)
+
+    # Try docker first
+    result = _docker_restart(container_name)
+    if result["success"]:
+        return result
+
+    # If docker not available, try API restart (for Render/cloud deployments)
+    # Use VICTIM_BASE_URL from environment
+    victim_base_url = os.getenv("VICTIM_BASE_URL")
+    if victim_base_url:
+        print(f"[incident] Docker not available, using API restart via {victim_base_url}")
+        return _api_restart(victim_base_url)
+
+    return result
 
 
 def _docker_restart(container_name: str) -> dict:
@@ -219,6 +232,26 @@ def _docker_restart(container_name: str) -> dict:
         return {"success": False, "error": result.stderr.strip()}
 
     return {"success": True}
+
+
+def _api_restart(base_url: str) -> dict:
+    """Restart victim-app via its admin API (for Render/cloud deployments).
+
+    Uses the victim-app's /admin/fix endpoint to simulate a container restart.
+    This is used when docker is not available (e.g., running on Render).
+    """
+    try:
+        # First break it to simulate the failure state, then fix it
+        # Actually, the victim-app is already broken (that's why we're here),
+        # so we just call /admin/fix to restore it
+        response = httpx.post(f"{base_url}/admin/fix", timeout=10)
+        if response.status_code == 200:
+            return {"success": True}
+        return {"success": False, "error": f"admin/fix returned {response.status_code}: {response.text}"}
+    except httpx.TimeoutException:
+        return {"success": False, "error": "admin/fix request timed out"}
+    except httpx.HTTPError as e:
+        return {"success": False, "error": f"admin/fix request failed: {e}"}
 
 
 def _ecs_restart() -> dict:
