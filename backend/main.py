@@ -170,6 +170,12 @@ def demo_trigger():
     return {"status": "triggered"}
 
 
+@app.get("/health")
+def health():
+    """Health check endpoint for Render."""
+    return {"status": "healthy", "service": "aisre-backend"}
+
+
 # Mounted last: a mount at "/" would otherwise shadow the API routes above.
 app.mount(
     "/dashboard",
