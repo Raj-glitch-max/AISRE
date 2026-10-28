@@ -18,7 +18,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 
 VICTIM_BASE_URL = os.getenv("VICTIM_BASE_URL", "http://localhost:8000")
 # Approval token for authentication (required for /approve endpoint)
-APPROVAL_TOKEN = os.getenv("APPROVAL_TOKEN")
+# Default for demo: "demo-approval-token" - override in production with APPROVAL_TOKEN env var
+APPROVAL_TOKEN = os.getenv("APPROVAL_TOKEN", "demo-approval-token")
 # Step Functions for AWS deployment
 SFN_STATE_MACHINE_ARN = os.getenv("SFN_STATE_MACHINE_ARN")
 
