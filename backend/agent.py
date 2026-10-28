@@ -74,6 +74,56 @@ def _get_client():
     return _client
 
 
+def _mock_investigate(incident_id: int) -> dict:
+    """Fallback mock investigation when NIM_KEY is not configured.
+
+    Simulates what the AI agent would produce for a typical victim-app failure.
+    """
+    import subprocess
+    import json as json_module
+
+    # Try to get some real evidence from the container
+    evidence = []
+    try:
+        result = subprocess.run(
+            ["docker", "logs", "--tail", "20", VICTIM_CONTAINER],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.stdout:
+            evidence.append(f"Container logs: {result.stdout[:500]}")
+    except Exception:
+        evidence.append("Could not retrieve container logs (docker not available in this environment)")
+
+    try:
+        result = subprocess.run(
+            ["docker", "inspect", VICTIM_CONTAINER],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.stdout:
+            evidence.append(f"Container state: {result.stdout[:500]}")
+    except Exception:
+        evidence.append("Could not inspect container")
+
+    # Check git commits if available
+    try:
+        result = subprocess.run(
+            ["git", "-C", VICTIM_REPO_PATH, "log", "--oneline", "-5"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.stdout:
+            evidence.append(f"Recent commits: {result.stdout}")
+    except Exception:
+        evidence.append("Could not retrieve git history")
+
+    return {
+        "root_cause": "victim-app container is unhealthy (502 Bad Gateway) - likely process crash or port binding issue",
+        "confidence": 0.85,
+        "evidence": evidence,
+        "recommended_action": "Restart the victim-app container to restore service",
+        "risk": "low"
+    }
+
+
 # Atlas capability checking for investigation tools
 _atlas_client = None
 
@@ -403,6 +453,32 @@ def investigate(incident_id: int) -> dict:
         f"[incident {incident_id}] "
         f"status -> investigating"
     )
+
+    # Check if NIM_KEY is available for AI investigation
+    has_nim_key = bool(os.environ.get("NVIDIA_API_KEY") or os.environ.get("NIM_KEY"))
+
+    if not has_nim_key:
+        # Fallback to mock investigation for demo purposes
+        print(f"[incident {incident_id}] NIM_KEY not set, using mock investigation")
+        mock_rca = _mock_investigate(incident_id)
+
+        incident = (
+            db.query(Incident)
+            .filter(Incident.id == incident_id)
+            .first()
+        )
+        incident.root_cause = mock_rca.get("root_cause")
+        incident.confidence = mock_rca.get("confidence")
+        incident.evidence = json.dumps(mock_rca.get("evidence", []))
+        incident.recommended_action = mock_rca.get("recommended_action")
+        incident.risk = mock_rca.get("risk")
+        incident.tool_transcript = json.dumps([{"tool": "mock", "result": mock_rca}])
+        incident.status = "pending_approval"
+        db.commit()
+        db.close()
+
+        print(f"[incident {incident_id}] status -> pending_approval (mock)")
+        return mock_rca
 
     messages = [
         {
