@@ -21,8 +21,8 @@ COPY backend/ /app/
 # Copy victim-app source for commit-history tool
 COPY victim-app/ /victim-app/
 
-# Copy .git for commit-history tool
-COPY .git/ /.git/
+# Note: .git is not copied (excluded from build context).
+# The commit-history tool will be unavailable but core functionality works.
 
 ENV PLATFORM=docker \
     PYTHONUNBUFFERED=1
