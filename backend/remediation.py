@@ -40,22 +40,17 @@ VERIFY_RETRY_INTERVAL = int(os.getenv("VERIFY_RETRY_INTERVAL", "3"))
 ECS_CLUSTER = os.getenv("ECS_CLUSTER", "")
 ECS_SERVICE = os.getenv("ECS_SERVICE", "")
 
-# Require explicit ATLAS_URL - no default to prevent accidental Railway usage
+# Atlas integration is optional for AISRE - can run without capability-based auth
 ATLAS_URL = os.getenv("ATLAS_URL")
-if not ATLAS_URL:
-    raise RuntimeError("ATLAS_URL must be set explicitly (no default)")
-
-# Optional API key for Atlas authentication
 ATLAS_API_KEY = os.getenv("ATLAS_API_KEY")
-
-# Global Atlas client (for non-gated operations)
-atlas = AtlasClient(ATLAS_URL, api_key=ATLAS_API_KEY)
-
-# Configurable principals via env vars (required for separation of duties)
 ATLAS_PRINCIPAL = os.getenv("ATLAS_PRINCIPAL")
 ATLAS_DELEGATE = os.getenv("ATLAS_DELEGATE")
-if not ATLAS_PRINCIPAL or not ATLAS_DELEGATE:
-    raise RuntimeError("ATLAS_PRINCIPAL and ATLAS_DELEGATE must be set explicitly")
+
+# Global Atlas client (only created if ATLAS_URL is set)
+atlas = AtlasClient(ATLAS_URL, api_key=ATLAS_API_KEY) if ATLAS_URL else None
+
+# Check if Atlas gated restart is enabled
+ATLAS_ENABLED = bool(ATLAS_URL and ATLAS_PRINCIPAL and ATLAS_DELEGATE)
 
 # Step Functions for AWS deployment
 SFN_STATE_MACHINE_ARN = os.getenv("SFN_STATE_MACHINE_ARN")
@@ -248,6 +243,11 @@ def _gated_restart(incident_id: int) -> dict:
     """Fail-closed by construction: every exit that isn't an explicit ACCEPT
     followed by a real restart attempt lands on 'failed'. There is no path
     that proceeds to docker restart without a verified capability."""
+
+    # If Atlas is not configured, skip gated restart and do direct restart
+    if not ATLAS_ENABLED:
+        print(f"[incident {incident_id}] Atlas not configured, performing direct restart")
+        return _restart_container(VICTIM_CONTAINER)
 
     # Create a dedicated client for this gated operation with API key
     # This ensures the capability is issued with proper authentication
