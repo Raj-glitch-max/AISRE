@@ -1,0 +1,59 @@
+services:
+  # Backend API + Dashboard (serves static files at /dashboard)
+  - type: web
+    name: aisre-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    plan: free
+    region: oregon
+    autoDeploy: true
+    branch: main
+    healthCheckPath: /health
+    envVars:
+      - key: PLATFORM
+        value: docker
+      - key: VICTIM_BASE_URL
+        fromService:
+          name: aisre-victim
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: VICTIM_HEALTH_URL
+        value: ${VICTIM_BASE_URL}/health
+      - key: VICTIM_CONTAINER
+        value: victim-app
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: NIM_KEY
+        sync: false
+      - key: APPROVAL_TOKEN
+        sync: false
+      - key: ATLAS_URL
+        sync: false
+      - key: ATLAS_API_KEY
+        sync: false
+      - key: ATLAS_PRINCIPAL
+        sync: false
+      - key: ATLAS_DELEGATE
+        sync: false
+      - key: ENABLE_DEMO
+        value: "true"
+      - key: DEMO_MODE
+        value: "true"
+      - key: DEMO_COOLDOWN_SECONDS
+        value: "30"
+
+  # Victim App - the service that gets "broken" and monitored
+  - type: web
+    name: aisre-victim
+    runtime: docker
+    dockerfilePath: ./victim-app/Dockerfile
+    dockerContext: ./victim-app
+    plan: free
+    region: oregon
+    autoDeploy: true
+    branch: main
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"

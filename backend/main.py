@@ -2,11 +2,12 @@ import asyncio
 import json
 import logging
 import os
+import time
 from datetime import datetime
 
 import boto3
 import httpx
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Header
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Header, Request
 from fastapi.staticfiles import StaticFiles
 
 from database import Base, SessionLocal, engine
@@ -23,9 +24,35 @@ APPROVAL_TOKEN = os.getenv("APPROVAL_TOKEN", "demo-approval-token")
 # Step Functions for AWS deployment
 SFN_STATE_MACHINE_ARN = os.getenv("SFN_STATE_MACHINE_ARN")
 
+# Demo mode: when true, /admin/fix is simulated (no real restart)
+# Also enables cooldown on demo endpoints to prevent abuse
+DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
+
+# Rate limiting for demo endpoints (in-memory, per-process)
+# Key: endpoint -> last_call_timestamp
+_demo_last_call: dict[str, float] = {}
+DEMO_COOLDOWN_SECONDS = int(os.getenv("DEMO_COOLDOWN_SECONDS", "30"))
+
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
+
+
+def _check_demo_cooldown(endpoint: str) -> None:
+    """Enforce cooldown on demo endpoints to prevent abuse.
+
+    In-memory per-process; sufficient for single-instance free tier.
+    """
+    if not DEMO_MODE:
+        return
+    now = time.time()
+    last = _demo_last_call.get(endpoint, 0)
+    if now - last < DEMO_COOLDOWN_SECONDS:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Demo endpoint on cooldown. Try again in {DEMO_COOLDOWN_SECONDS - int(now - last)}s"
+        )
+    _demo_last_call[endpoint] = now
 
 
 @app.on_event("startup")
@@ -86,6 +113,9 @@ def approve_incident(
 ):
     # Verify authentication token
     verify_approval_token(authorization)
+
+    # Enforce cooldown in demo mode
+    _check_demo_cooldown("approve")
 
     # Checked here, synchronously, before the task is scheduled — not only inside
     # approve_and_remediate(). BackgroundTasks runs after the response is already
@@ -167,6 +197,8 @@ def demo_trigger():
             status_code=403,
             detail="Demo endpoint disabled. Set ENABLE_DEMO=true to enable."
         )
+    # Enforce cooldown in demo mode
+    _check_demo_cooldown("trigger-incident")
     httpx.post(f"{VICTIM_BASE_URL}/admin/break", timeout=5)
     return {"status": "triggered"}
 

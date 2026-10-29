@@ -56,6 +56,9 @@ ATLAS_ENABLED = bool(ATLAS_URL and ATLAS_PRINCIPAL and ATLAS_DELEGATE)
 SFN_STATE_MACHINE_ARN = os.getenv("SFN_STATE_MACHINE_ARN")
 S3_TRANSCRIPT_BUCKET = os.getenv("S3_TRANSCRIPT_BUCKET")
 
+# Demo mode: when true, restart is simulated (no real container restart)
+DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
+
 
 # --- Offline verification (JWS/JWT decode) ---
 def _decode_jwt_payload(token: str) -> dict:
@@ -197,6 +200,11 @@ def _restart_container(container_name: str) -> dict:
     same way `docker restart <fixed name>` cannot. That equivalence is what lets the
     safety argument survive the move to Fargate unchanged.
     """
+    # Demo mode: simulate successful restart without touching any containers
+    if DEMO_MODE:
+        print(f"[incident] DEMO_MODE: simulating restart of {container_name}")
+        return {"success": True, "demo": True}
+
     if PLATFORM == "ecs":
         return _ecs_restart()
 

@@ -190,7 +190,7 @@ terraform init && terraform plan -out=tf.plan
 terraform apply tf.plan
 ```
 
-59 resources: ECS Fargate, ALB, RDS Postgres, Step Functions approval gate, Cloud Map
+63 resources: ECS Fargate, ALB, RDS Postgres, Step Functions approval gate, Cloud Map
 private DNS, scoped IAM, S3, Secrets Manager, CloudWatch alarms, budget alarm.
 
 **`terraform destroy` when you're done.** NAT Gateway (~$32/mo), RDS (~$13/mo) and ALB
